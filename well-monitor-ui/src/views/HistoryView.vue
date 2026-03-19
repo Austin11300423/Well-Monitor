@@ -1,0 +1,382 @@
+<template>
+  <div class="panel">
+    <h2 class="panel-title"><i class="fa-solid fa-chart-line"></i> 历史生产递减与 Arps 产量预测</h2>
+
+    <div class="analysis-layout">
+      <div class="config-panel">
+        <div class="config-section">
+          <h3><i class="fa-solid fa-filter"></i> 1. 分析对象</h3>
+          <select v-model="selectedWellId" @change="handleWellChange" class="full-select">
+            <option v-for="well in wellList" :key="well.wellId" :value="well.wellId">
+              {{ well.wellId }} ({{ well.wellType }})
+            </option>
+          </select>
+        </div>
+
+        <div class="config-section">
+          <h3><i class="fa-solid fa-calendar-days"></i> 2. 历史数据区间</h3>
+          <div class="param-item">
+            <label>开始日期</label>
+            <input type="date" v-model="startDate" class="date-input">
+          </div>
+          <div class="param-item">
+            <label>结束日期</label>
+            <input type="date" v-model="endDate" class="date-input">
+          </div>
+          <div class="btn-group">
+            <button class="query-btn" @click="handleWellChange"><i class="fa-solid fa-magnifying-glass"></i> 区间查询</button>
+            <button class="mock-btn" @click="generateMockData"><i class="fa-solid fa-bolt"></i> 生成90天模拟</button>
+          </div>
+        </div>
+
+        <div v-if="selectedWellType === '油井'" class="config-section arps-config">
+          <h3><i class="fa-solid fa-calculator"></i> 3. Arps 产量递减预测</h3>
+          <div class="param-item">
+            <label>预测未来时长 (天)</label>
+            <input type="number" v-model.number="predictDays" min="1" max="365" @change="calculatePrediction" class="num-input">
+          </div>
+          <div class="param-item slider-item">
+            <div class="label-row">
+              <label>初始日递减率 Di</label>
+              <span class="value">{{ (arpsDi * 100).toFixed(2) }} %</span>
+            </div>
+            <input type="range" v-model.number="arpsDi" min="0.0001" max="0.05" step="0.0001" @input="calculatePrediction">
+          </div>
+          <div class="param-item slider-item">
+            <div class="label-row">
+              <label>递减指数 b</label>
+              <span class="value">{{ arpsB.toFixed(2) }}</span>
+            </div>
+            <input type="range" v-model.number="arpsB" min="0" max="1" step="0.01" @input="calculatePrediction">
+          </div>
+
+          <div class="arps-help-box">
+            <h4><i class="fa-solid fa-lightbulb"></i> 参数调校指南</h4>
+            <ul>
+              <li><strong>Di (初始递减率)</strong>：控制曲线初期的下降速度。如果预测线在前期比历史散点偏高（降得不够快），请适当<b>调大 Di</b>。</li>
+              <li><strong>b (递减指数)</strong>：控制中后期的曲率。b=0代表衰减极快，b越接近1尾期越长。如果预测线在后期跌得太深，请适当<b>调大 b</b>。</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+
+      <div class="right-content">
+        <div class="chart-area">
+          <button class="btn-reset-view" @click="resetDateRange" title="清除时间筛选与鼠标缩放，恢复完整视图">
+            <i class="fa-solid fa-expand"></i> 恢复完整视图
+          </button>
+
+          <div class="chart-container" ref="historyChartRef"></div>
+        </div>
+
+        <div class="data-table-area" v-if="selectedWellType === '油井' && forecastTableData.length > 0">
+          <div class="table-header">
+            <h3><i class="fa-solid fa-table-list"></i> 预测数据明细表
+              <span class="subtitle">(基于当前 Arps 模型生成)</span>
+            </h3>
+            <div class="eur-card">
+              <span class="eur-label">未来 {{ predictDays }} 天预估增产油量：</span>
+              <span class="eur-value">{{ totalPredictedOil.toFixed(1) }} <small>吨</small></span>
+            </div>
+          </div>
+
+          <div class="table-wrapper">
+            <table class="forecast-table">
+              <thead>
+              <tr>
+                <th>预测日期</th>
+                <th>预估产液量 (t/d)</th>
+                <th>预估产油量 (t/d)</th>
+                <th>预估含水率 (%)</th>
+              </tr>
+              </thead>
+              <tbody>
+              <tr v-for="(row, index) in forecastTableData" :key="index">
+                <td><strong>{{ row.date }}</strong></td>
+                <td class="text-liquid">{{ row.predLiquid }}</td>
+                <td class="text-oil"><strong>{{ row.predOil }}</strong></td>
+                <td class="text-water">{{ row.waterCut }}%</td>
+              </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+      </div>
+    </div>
+  </div>
+</template>
+
+<script setup>
+import { ref, onMounted, nextTick, computed } from 'vue'
+import request from '../utils/request'
+import * as echarts from 'echarts'
+
+const wellList = ref([])
+const selectedWellId = ref('')
+const selectedWellType = ref('油井')
+const startDate = ref('')
+const endDate = ref('')
+const historyChartRef = ref(null)
+let myChart = null
+
+const predictDays = ref(30) // 考虑到之前数据是按天，这里把预测单位改为天更符合逻辑
+const arpsDi = ref(0.005)
+const arpsB = ref(0.3)
+
+let baseMonths = [], baseLiquid = [], baseOil = [], baseWaterCut = [], baseInject = [], basePressure = []
+let chartMonths = [], chartHistLiquid = [], chartPredLiquid = [], chartHistOil = [], chartPredOil = [], chartWaterCut = []
+
+// 🌟 新增：预测数据表格的响应式数据
+const forecastTableData = ref([])
+
+// 🌟 新增：计算预测总产油量 (EUR部分)
+const totalPredictedOil = computed(() => {
+  return forecastTableData.value.reduce((sum, row) => sum + row.predOil, 0)
+})
+
+const formatDate = (dateStr) => {
+  if (!dateStr) return ''
+  const d = new Date(dateStr)
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
+
+const fetchWells = async () => {
+  try {
+    const res = await request.get('/api/well/list-with-data')
+    const rawData = res.data || []
+
+    wellList.value = rawData.map(item => item.info ? item.info : item)
+
+    if (wellList.value.length > 0) {
+      selectedWellId.value = wellList.value[0].wellId
+      selectedWellType.value = wellList.value[0].wellType
+
+      await nextTick()
+      handleWellChange()
+    }
+  } catch (error) {
+    console.error('获取井列表失败:', error)
+  }
+}
+
+const generateMockData = async () => {
+  try {
+    if(!confirm("确定要为全区所有井生成过去 90 天的历史衰减数据吗？")) return
+    const res = await request.post('/api/well/prod/generate-mock')
+    alert(res.data)
+    startDate.value = ''; endDate.value = ''; handleWellChange()
+  } catch (error) { alert("生成失败") }
+}
+
+// 🌟 修改：恢复按钮的逻辑增强
+const resetDateRange = () => {
+  startDate.value = ''
+  endDate.value = ''
+  // 触发 ECharts 内置的恢复动作，专门对付鼠标滚轮的缩放
+  if (myChart) {
+    myChart.dispatchAction({ type: 'dataZoom', start: 0, end: 100 })
+    myChart.dispatchAction({ type: 'restore' })
+  }
+  handleWellChange()
+}
+
+const handleWellChange = async () => {
+  if (!selectedWellId.value) return
+
+  const targetWell = wellList.value.find(w => w.wellId === selectedWellId.value)
+  if (targetWell) selectedWellType.value = targetWell.wellType
+
+  baseMonths = []; baseLiquid = []; baseOil = []; baseWaterCut = []; baseInject = []; basePressure = []
+
+  try {
+    const params = { wellId: selectedWellId.value }
+    if (startDate.value) params.startDate = startDate.value
+    if (endDate.value) params.endDate = endDate.value
+
+    const res = await request.get('/api/well/prod/daily', { params })
+    const data = res.data || []
+
+    data.forEach(d => {
+      baseMonths.push(formatDate(d.recordDate))
+      if (selectedWellType.value === '油井') {
+        baseLiquid.push(parseFloat((d.liquidVol || 0).toFixed(1)))
+        baseOil.push(parseFloat((d.oilVol || 0).toFixed(1)))
+        baseWaterCut.push(parseFloat((d.waterCut || 0).toFixed(1)))
+      } else {
+        baseInject.push(parseFloat((d.injectVol || 0).toFixed(1)))
+        basePressure.push(parseFloat((d.pressure || 0).toFixed(1)))
+      }
+    })
+
+    calculatePrediction()
+  } catch (error) {
+    console.error("查询历史数据失败", error)
+  }
+}
+
+const calculatePrediction = () => {
+  chartMonths = [...baseMonths]
+  forecastTableData.value = [] // 每次计算清空表格
+
+  if (selectedWellType.value === '水井' || baseLiquid.length === 0) {
+    renderChart();
+    return
+  }
+
+  chartHistLiquid = [...baseLiquid]; chartHistOil = [...baseOil]; chartWaterCut = [...baseWaterCut]
+  chartPredLiquid = []; chartPredOil = []
+
+  for (let i = 0; i < baseLiquid.length - 1; i++) {
+    chartPredLiquid.push(null); chartPredOil.push(null)
+  }
+
+  const lastIdx = baseLiquid.length - 1
+  chartPredLiquid.push(baseLiquid[lastIdx]); chartPredOil.push(baseOil[lastIdx])
+
+  const Qi_liq = baseLiquid[lastIdx], Qi_oil = baseOil[lastIdx], Di = arpsDi.value, b = arpsB.value
+  let lastRealDate = new Date(baseMonths[lastIdx] || new Date())
+
+  for (let t = 1; t <= predictDays.value; t++) {
+    let nextDate = new Date(lastRealDate.getTime() + t * 24 * 60 * 60 * 1000) // 按天推算
+    let formattedDate = formatDate(nextDate)
+    chartMonths.push(formattedDate)
+
+    let Qt_liq = b === 0 ? Qi_liq * Math.exp(-Di * t) : Qi_liq * Math.pow((1 + b * Di * t), -1 / b)
+    let Qt_oil = b === 0 ? Qi_oil * Math.exp(-Di * 1.5 * t) : Qi_oil * Math.pow((1 + b * Di * 1.5 * t), -1 / b)
+
+    let predL = parseFloat(Qt_liq.toFixed(1))
+    let predO = parseFloat(Qt_oil.toFixed(1))
+    let wc = parseFloat((((predL - predO) / predL) * 100).toFixed(1))
+
+    chartPredLiquid.push(predL)
+    chartPredOil.push(predO)
+    chartWaterCut.push(wc)
+
+    // 🌟 将预测数据推入表格数组
+    forecastTableData.value.push({
+      date: formattedDate,
+      predLiquid: predL,
+      predOil: predO,
+      waterCut: wc
+    })
+  }
+
+  renderChart()
+}
+
+const renderChart = async () => {
+  await nextTick()
+  if (!historyChartRef.value) return
+
+  if (!myChart) {
+    myChart = echarts.init(historyChartRef.value)
+  }
+  myChart.clear()
+
+  const seriesData = []
+  let yAxisConfig = []
+
+  if (selectedWellType.value === '油井') {
+    yAxisConfig = [
+      { type: 'value', name: '产量 (t/d)', position: 'left', splitLine: { lineStyle: { type: 'dashed', color: '#edf2f7' } } },
+      { type: 'value', name: '含水率 (%)', position: 'right', min: 0, max: 100, splitLine: { show: false } }
+    ]
+    seriesData.push(
+        { name: '历史产液量', type: 'bar', yAxisIndex: 0, barWidth: '40%', itemStyle: { color: '#00cec9', borderRadius: [4, 4, 0, 0] }, data: chartHistLiquid },
+        { name: '预测产液量', type: 'line', yAxisIndex: 0, smooth: false, symbol: 'emptyCircle', itemStyle: { color: '#00cec9' }, lineStyle: { width: 3, type: 'dashed' }, data: chartPredLiquid },
+        { name: '历史产油量', type: 'line', yAxisIndex: 0, smooth: true, itemStyle: { color: '#e17055' }, lineStyle: { width: 3 }, data: chartHistOil },
+        { name: '预测产油量', type: 'line', yAxisIndex: 0, smooth: false, itemStyle: { color: '#e17055' }, lineStyle: { width: 3, type: 'dashed' }, data: chartPredOil },
+        { name: '综合含水率', type: 'line', yAxisIndex: 1, smooth: true, itemStyle: { color: '#3498db' }, lineStyle: { width: 2, type: 'dotted' }, data: chartWaterCut }
+    )
+  } else {
+    yAxisConfig = [
+      { type: 'value', name: '注水量 (m³/d)', position: 'left', splitLine: { lineStyle: { type: 'dashed', color: '#edf2f7' } } },
+      { type: 'value', name: '注水压力 (MPa)', position: 'right', splitLine: { show: false } }
+    ]
+    seriesData.push(
+        { name: '历史注水量', type: 'bar', yAxisIndex: 0, barWidth: '40%', itemStyle: { color: '#3498db', borderRadius: [4, 4, 0, 0] }, data: baseInject },
+        { name: '历史注水压力', type: 'line', yAxisIndex: 1, smooth: true, itemStyle: { color: '#e74c3c' }, lineStyle: { width: 3 }, data: basePressure }
+    )
+  }
+
+  myChart.setOption({
+    title: { text: `[${selectedWellId.value || '未选择井号'}] 历史递减数据与未来预测分析`, left: 'center', top: 10 },
+    tooltip: { trigger: 'axis', axisPointer: { type: 'cross' } },
+    legend: { top: 50 },
+    toolbox: { feature: { dataZoom: { yAxisIndex: 'none' }, restore: {} } }, // 启用内置工具箱防伪
+    dataZoom: [{ type: 'inside', start: 0, end: 100 }, { start: 0, end: 100 }],
+    grid: { left: '3%', right: '3%', bottom: '10%', top: 100, containLabel: true },
+    xAxis: { type: 'category', boundaryGap: true, data: chartMonths },
+    yAxis: yAxisConfig,
+    series: seriesData
+  })
+}
+
+onMounted(() => {
+  fetchWells()
+  window.addEventListener('resize', () => { myChart?.resize() })
+})
+</script>
+
+<style scoped>
+.panel { background-color: #ffffff; border-radius: 12px; box-shadow: 0 4px 20px rgba(0,0,0,0.04); padding: 24px; min-height: calc(100vh - 112px); box-sizing: border-box; }
+.panel-title { margin-top: 0; margin-bottom: 24px; font-size: 20px; color: var(--primary-color); border-bottom: 2px solid #f0f4f8; padding-bottom: 12px; }
+.analysis-layout { display: flex; gap: 24px;}
+.config-panel { flex: 0 0 320px; display: flex; flex-direction: column; gap: 20px;}
+.config-section { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 18px;}
+.config-section h3 { margin-top: 0; margin-bottom: 16px; font-size: 15px; color: var(--primary-color); display: flex; align-items: center; gap: 8px;}
+.full-select { width: 100%; padding: 10px; border: 1px solid #bdc3c7; border-radius: 6px; font-size: 14px; outline: none;}
+.num-input { width: 80px; padding: 8px; border: 1px solid #bdc3c7; border-radius: 6px;}
+.param-item { margin-bottom: 16px; display: flex; justify-content: space-between; align-items: center; }
+.param-item label { font-size: 13px; color: #555; }
+.date-input { width: 135px; padding: 6px; border: 1px solid #bdc3c7; border-radius: 6px; font-size: 13px; }
+
+.btn-group { display: flex; gap: 10px; margin-top: 20px; }
+.query-btn, .mock-btn { flex: 1; padding: 10px 0; border: none; border-radius: 6px; color: white; cursor: pointer; font-size: 13px; font-weight: bold; transition: 0.2s;}
+.query-btn { background: var(--primary-color, #3498db); }
+.query-btn:hover { background: #2980b9; }
+.mock-btn { background: #e67e22; }
+.mock-btn:hover { background: #d35400; }
+
+.slider-item { flex-direction: column; align-items: flex-start;}
+.label-row { display: flex; justify-content: space-between; width: 100%; margin-bottom: 6px;}
+.slider-item .value { font-size: 13px; color: #e67e22; font-weight: bold;}
+.slider-item input[type="range"] { width: 100%; cursor: pointer; accent-color: var(--primary-color); }
+
+.arps-help-box { margin-top: 20px; background: #e0f2fe; padding: 12px; border-radius: 6px; border: 1px solid #bae6fd;}
+.arps-help-box h4 { margin: 0 0 8px 0; font-size: 13px; color: #0284c7; display: flex; align-items: center; gap: 6px; }
+.arps-help-box ul { margin: 0; padding-left: 20px; font-size: 12px; color: #334155; line-height: 1.6; }
+.arps-help-box b { color: #0ea5e9; }
+
+/* 🌟 右侧布局变更为 Flex 垂直排列，自适应内容 */
+.right-content { flex: 1; display: flex; flex-direction: column; gap: 20px; min-width: 0; }
+.chart-area { height: 450px; background: white; border: 1px solid #e2e8f0; border-radius: 8px; padding: 20px; position: relative; flex-shrink: 0;}
+.chart-container { height: 100%; width: 100%; }
+
+.btn-reset-view { position: absolute; top: 15px; right: 20px; z-index: 10; background: white; border: 1px solid #e2e8f0; padding: 6px 12px; border-radius: 20px; font-size: 12px; font-weight: bold; color: #64748b; cursor: pointer; box-shadow: 0 2px 6px rgba(0,0,0,0.05); transition: all 0.2s; display: flex; align-items: center; gap: 6px; }
+.btn-reset-view:hover { background: #f1f5f9; color: #3498db; border-color: #3498db; box-shadow: 0 4px 10px rgba(52, 152, 219, 0.15); transform: translateY(-1px); }
+
+/* 🌟 新增：表格和 EUR 评估区样式 */
+.data-table-area { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 20px; flex: 1; display: flex; flex-direction: column;}
+.table-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px; border-bottom: 2px dashed #cbd5e1; padding-bottom: 15px;}
+.table-header h3 { margin: 0; font-size: 16px; color: #2c3e50; }
+.subtitle { font-size: 12px; color: #94a3b8; font-weight: normal; margin-left: 8px;}
+.eur-card { background: #fff5f5; border: 1px solid #fecaca; padding: 8px 16px; border-radius: 30px; display: flex; align-items: center; gap: 10px; box-shadow: 0 2px 8px rgba(239, 68, 68, 0.1);}
+.eur-label { font-size: 13px; color: #ef4444; font-weight: bold;}
+.eur-value { font-size: 20px; font-weight: 900; color: #b91c1c;}
+.eur-value small { font-size: 12px; font-weight: normal;}
+
+.table-wrapper { flex: 1; overflow-y: auto; max-height: 250px; background: white; border: 1px solid #e2e8f0; border-radius: 6px; }
+.table-wrapper::-webkit-scrollbar { width: 6px; }
+.table-wrapper::-webkit-scrollbar-thumb { background-color: #cbd5e1; border-radius: 10px; }
+
+.forecast-table { width: 100%; border-collapse: collapse; text-align: center; font-size: 13px;}
+.forecast-table th { background: #f1f5f9; color: #475569; padding: 10px; position: sticky; top: 0; z-index: 1; border-bottom: 1px solid #cbd5e1; font-weight: bold;}
+.forecast-table td { padding: 10px; border-bottom: 1px solid #f1f5f9; color: #334155; }
+.forecast-table tr:hover { background-color: #f8fafc; }
+
+.text-liquid { color: #00cec9; }
+.text-oil { color: #e17055; font-size: 14px;}
+.text-water { color: #3498db; }
+</style>
