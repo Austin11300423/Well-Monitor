@@ -54,47 +54,54 @@
             </div>
 
             <div v-if="selectedWell.status === '停机'" class="offline-warning">
-              <i class="fa-solid fa-link-slash"></i> 设备已停机，传感器链路断开，当前显示归零数据。
+              <i class="fa-solid fa-link-slash"></i> 设备已停机，传感器链路断开。
             </div>
 
-            <div v-if="selectedWell.wellType === '油井'" class="data-grid" :class="{'disabled-grid': selectedWell.status === '停机'}">
-              <div class="data-box">
-                <span class="label">当前产液量</span>
-                <span class="value oil-val">{{ realTimeData.liquid || '--' }} <small>t/d</small></span>
-              </div>
-              <div class="data-box">
-                <span class="label">井口压力</span>
-                <span class="value">{{ realTimeData.pressure || '--' }} <small>MPa</small></span>
-              </div>
-              <div class="data-box">
-                <span class="label">实时含水率</span>
-                <span class="value water-val">{{ realTimeData.waterCut || '--' }} <small>%</small></span>
-              </div>
-              <div class="data-box">
-                <span class="label">载荷极值</span>
-                <span class="value">{{ realTimeData.load || '--' }} <small>kN</small></span>
-              </div>
+            <div v-else-if="!realTimeData.isOnline" class="offline-warning" style="background-color: #f8fafc; border-color: #cbd5e1; color: #64748b;">
+              <i class="fa-solid fa-spinner fa-spin"></i> 正在等待传感器信号接入...
             </div>
 
-            <div v-if="selectedWell.wellType === '水井'" class="data-grid" :class="{'disabled-grid': selectedWell.status === '停机'}">
-              <div class="data-box">
-                <span class="label">瞬时注水量</span>
-                <span class="value water-val">{{ realTimeData.injectRate || '--' }} <small>m³/h</small></span>
-              </div>
-              <div class="data-box">
-                <span class="label">注水压力</span>
-                <span class="value danger-val">{{ realTimeData.injectPress || '--' }} <small>MPa</small></span>
-              </div>
-              <div class="data-box full-width">
-                <span class="label"><i class="fa-solid fa-link"></i> 对应受效油井</span>
-                <div class="target-wells">
-                  <span v-for="t in selectedWell.targets" :key="t.wellId" class="target-tag">
-                    {{ t.wellId }}
-                  </span>
-                  <span v-if="!selectedWell.targets || selectedWell.targets.length === 0" class="target-tag text-muted">暂无绑定关系</span>
+            <template v-else>
+              <div v-if="selectedWell.wellType === '油井'" class="data-grid">
+                <div class="data-box">
+                  <span class="label">当前产液量</span>
+                  <span class="value oil-val">{{ realTimeData.liquid || '--' }} <small>t/d</small></span>
+                </div>
+                <div class="data-box">
+                  <span class="label">井口压力</span>
+                  <span class="value">{{ realTimeData.pressure || '--' }} <small>MPa</small></span>
+                </div>
+                <div class="data-box">
+                  <span class="label">实时含水率</span>
+                  <span class="value water-val">{{ realTimeData.waterCut || '--' }} <small>%</small></span>
+                </div>
+                <div class="data-box">
+                  <span class="label">载荷极值</span>
+                  <span class="value">{{ realTimeData.load || '--' }} <small>kN</small></span>
                 </div>
               </div>
-            </div>
+
+              <div v-if="selectedWell.wellType === '水井'" class="data-grid">
+                <div class="data-box">
+                  <span class="label">瞬时注水量</span>
+                  <span class="value water-val">{{ realTimeData.injectRate || '--' }} <small>m³/h</small></span>
+                </div>
+                <div class="data-box">
+                  <span class="label">注水压力</span>
+                  <span class="value danger-val">{{ realTimeData.injectPress || '--' }} <small>MPa</small></span>
+                </div>
+                <div class="data-box full-width">
+                  <span class="label"><i class="fa-solid fa-link"></i> 对应受效油井</span>
+                  <div class="target-wells">
+                    <span v-for="t in selectedWell.targets" :key="t.wellId" class="target-tag">
+                      {{ t.wellId }}
+                    </span>
+                    <span v-if="!selectedWell.targets || selectedWell.targets.length === 0" class="target-tag text-muted">暂无绑定关系</span>
+                  </div>
+                </div>
+              </div>
+            </template>
+
           </div>
         </div>
       </transition>
@@ -139,11 +146,9 @@ const selectWellFromSearch = (well) => {
   searchQuery.value = well.wellId
   showDropdown.value = false
 
-  // 🌟 核心修复：把字符串强制转成带小数的数字，再做数学加法
   const lat = parseFloat(well.latitude)
   const lng = parseFloat(well.longitude)
 
-  // 将地图中心平滑移动过去（经度 + 0.01 完美避开右侧面板遮挡）
   myMap.setView([lat, lng ], 16, { animate: true })
 
   openWellPanel(well)
@@ -170,7 +175,6 @@ const renderMarkers = () => {
     const iconHtml = `<div class="marker-icon-wrapper ${bgColorClass}"><i class="fa-solid ${well.wellType === '油井' ? 'fa-oil-well' : 'fa-droplet'}"></i></div>`
     const customIcon = L.divIcon({ className: 'custom-div-icon', html: iconHtml, iconSize: [30, 30], iconAnchor: [15, 15] })
 
-    // 🌟 在这里加一句：强制转换用于初始渲染
     const initLat = parseFloat(well.latitude)
     const initLng = parseFloat(well.longitude)
 
@@ -179,7 +183,6 @@ const renderMarkers = () => {
 
     marker.on('click', () => {
       openWellPanel(well)
-      // 🌟 在点击事件里：强制转换并偏移
       const clickLat = parseFloat(well.latitude)
       const clickLng = parseFloat(well.longitude)
       myMap.setView([clickLat, clickLng + 0.01], 14, { animate: true })
@@ -218,7 +221,6 @@ onMounted(async () => {
   await nextTick()
   initMap()
   try {
-    // 🌟 核心修复：同样使用智能解构，剥离出纯净的 info
     const resWells = await request.get('/api/well/list-with-data')
     wellList.value = resWells.data.map(item => item.info ? item.info : item)
 

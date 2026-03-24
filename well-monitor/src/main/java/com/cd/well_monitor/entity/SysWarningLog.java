@@ -31,17 +31,30 @@ public class SysWarningLog {
     @TableField("STATUS")
     private String status;
 
+    // ======== 新增字段：用于区分是“实时异常”还是“预测风险” ========
+    @TableField("WARNING_TYPE")
+    private Integer warningType;
+
     // --- 快捷 Getter 和 Setter 保持不变 ---
     public Long getId() { return id; }
     public void setId(Long id) { this.id = id; }
+
     public String getWellId() { return wellId; }
     public void setWellId(String wellId) { this.wellId = wellId; }
+
     public String getWarningLevel() { return warningLevel; }
     public void setWarningLevel(String warningLevel) { this.warningLevel = warningLevel; }
+
     public String getWarningContent() { return warningContent; }
     public void setWarningContent(String warningContent) { this.warningContent = warningContent; }
+
     public Date getCreateTime() { return createTime; }
     public void setCreateTime(Date createTime) { this.createTime = createTime; }
+
     public String getStatus() { return status; }
     public void setStatus(String status) { this.status = status; }
+
+    // ======== 新增字段的 Getter 和 Setter ========
+    public Integer getWarningType() { return warningType; }
+    public void setWarningType(Integer warningType) { this.warningType = warningType; }
 }

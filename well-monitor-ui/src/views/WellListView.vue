@@ -98,7 +98,7 @@
             </div>
           </div>
 
-          <div class="section-title"><i class="fa-solid fa-gauge-high"></i> 3. 生产动态概览 (只读)</div>
+          <div class="section-title"><i class="fa-solid fa-gauge-high"></i> 3. 生产动态概览</div>
           <div class="prod-readonly-panel">
             <div class="readonly-msg"><i class="fa-solid fa-robot"></i> 生产数据由后端模拟器实时注入，手动编辑已禁用</div>
 

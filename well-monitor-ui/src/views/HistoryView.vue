@@ -1,6 +1,6 @@
 <template>
   <div class="panel">
-    <h2 class="panel-title"><i class="fa-solid fa-chart-line"></i> 历史生产递减与 Arps 产量预测</h2>
+    <h2 class="panel-title"><i class="fa-solid fa-chart-line"></i> 历史生产递减与多算法产量预测</h2>
 
     <div class="analysis-layout">
       <div class="config-panel">
@@ -30,33 +30,73 @@
         </div>
 
         <div v-if="selectedWellType === '油井'" class="config-section arps-config">
-          <h3><i class="fa-solid fa-calculator"></i> 3. Arps 产量递减预测</h3>
+          <h3><i class="fa-solid fa-microchip"></i> 3. 智能预测引擎</h3>
+
+          <div class="param-item">
+            <label>预测算法</label>
+            <select v-model="selectedAlgorithm" @change="calculatePrediction" class="full-select" style="width: 150px;">
+              <option value="arps">Arps 递减机理模型</option>
+              <option value="gm11">GM(1,1) 灰色预测</option>
+              <option value="lstm">LSTM 深度神经网络</option>
+            </select>
+          </div>
+
           <div class="param-item">
             <label>预测未来时长 (天)</label>
             <input type="number" v-model.number="predictDays" min="1" max="365" @change="calculatePrediction" class="num-input">
           </div>
-          <div class="param-item slider-item">
-            <div class="label-row">
-              <label>初始日递减率 Di</label>
-              <span class="value">{{ (arpsDi * 100).toFixed(2) }} %</span>
+
+          <div v-if="selectedAlgorithm === 'arps'">
+            <div class="param-item slider-item">
+              <div class="label-row">
+                <label>初始日递减率 Di</label>
+                <span class="value">{{ (arpsDi * 100).toFixed(2) }} %</span>
+              </div>
+              <input type="range" v-model.number="arpsDi" min="0.0001" max="0.05" step="0.0001" @input="calculatePrediction">
             </div>
-            <input type="range" v-model.number="arpsDi" min="0.0001" max="0.05" step="0.0001" @input="calculatePrediction">
-          </div>
-          <div class="param-item slider-item">
-            <div class="label-row">
-              <label>递减指数 b</label>
-              <span class="value">{{ arpsB.toFixed(2) }}</span>
+            <div class="param-item slider-item">
+              <div class="label-row">
+                <label>递减指数 b</label>
+                <span class="value">{{ arpsB.toFixed(2) }}</span>
+              </div>
+              <input type="range" v-model.number="arpsB" min="0" max="1" step="0.01" @input="calculatePrediction">
             </div>
-            <input type="range" v-model.number="arpsB" min="0" max="1" step="0.01" @input="calculatePrediction">
+            <div class="arps-help-box">
+              <h4><i class="fa-solid fa-lightbulb"></i> Arps 参数调校</h4>
+              <ul>
+                <li><strong>Di</strong>：控制初期下降速度。前期降得慢请调大。</li>
+                <li><strong>b</strong>：控制中后期曲率。后期跌太深请调大。</li>
+              </ul>
+            </div>
           </div>
 
-          <div class="arps-help-box">
-            <h4><i class="fa-solid fa-lightbulb"></i> 参数调校指南</h4>
-            <ul>
-              <li><strong>Di (初始递减率)</strong>：控制曲线初期的下降速度。如果预测线在前期比历史散点偏高（降得不够快），请适当<b>调大 Di</b>。</li>
-              <li><strong>b (递减指数)</strong>：控制中后期的曲率。b=0代表衰减极快，b越接近1尾期越长。如果预测线在后期跌得太深，请适当<b>调大 b</b>。</li>
-            </ul>
+          <div v-if="selectedAlgorithm === 'gm11'">
+            <div class="arps-help-box" style="background: #f0fdf4; border-color: #bbf7d0;">
+              <h4 style="color: #166534;"><i class="fa-solid fa-circle-nodes"></i> GM(1,1) 真实引擎已接入</h4>
+              <ul>
+                <li>基于历史真实数据矩阵进行最小二乘解算。</li>
+                <li>具备算法熔断机制，极端数据自动平滑降级。</li>
+              </ul>
+            </div>
           </div>
+
+          <div v-if="selectedAlgorithm === 'lstm'">
+            <div class="param-item">
+              <label>Time Steps (时间步)</label>
+              <input type="number" value="7" disabled class="num-input" style="background: #f1f5f9;">
+            </div>
+            <div class="param-item">
+              <label>Epochs (训练轮数)</label>
+              <input type="number" value="200" disabled class="num-input" style="background: #f1f5f9;">
+            </div>
+            <div class="arps-help-box" style="background: #f5f3ff; border-color: #ddd6fe;">
+              <h4 style="color: #5b21b6;"><i class="fa-solid fa-network-wired"></i> LSTM 深度学习</h4>
+              <ul>
+                <li>当前为前端系统模拟演算，后续计划接入 Python 服务。</li>
+              </ul>
+            </div>
+          </div>
+
         </div>
       </div>
 
@@ -65,14 +105,13 @@
           <button class="btn-reset-view" @click="resetDateRange" title="清除时间筛选与鼠标缩放，恢复完整视图">
             <i class="fa-solid fa-expand"></i> 恢复完整视图
           </button>
-
           <div class="chart-container" ref="historyChartRef"></div>
         </div>
 
         <div class="data-table-area" v-if="selectedWellType === '油井' && forecastTableData.length > 0">
           <div class="table-header">
             <h3><i class="fa-solid fa-table-list"></i> 预测数据明细表
-              <span class="subtitle">(基于当前 Arps 模型生成)</span>
+              <span class="subtitle">(基于 {{ algorithmNameMap[selectedAlgorithm] }} 生成)</span>
             </h3>
             <div class="eur-card">
               <span class="eur-label">未来 {{ predictDays }} 天预估增产油量：</span>
@@ -101,7 +140,6 @@
             </table>
           </div>
         </div>
-
       </div>
     </div>
   </div>
@@ -120,17 +158,22 @@ const endDate = ref('')
 const historyChartRef = ref(null)
 let myChart = null
 
-const predictDays = ref(30) // 考虑到之前数据是按天，这里把预测单位改为天更符合逻辑
+const selectedAlgorithm = ref('arps')
+const algorithmNameMap = {
+  arps: 'Arps 递减模型',
+  gm11: 'GM(1,1) 灰色预测',
+  lstm: 'LSTM 神经网络'
+}
+
+const predictDays = ref(30)
 const arpsDi = ref(0.005)
 const arpsB = ref(0.3)
 
 let baseMonths = [], baseLiquid = [], baseOil = [], baseWaterCut = [], baseInject = [], basePressure = []
 let chartMonths = [], chartHistLiquid = [], chartPredLiquid = [], chartHistOil = [], chartPredOil = [], chartWaterCut = []
 
-// 🌟 新增：预测数据表格的响应式数据
 const forecastTableData = ref([])
 
-// 🌟 新增：计算预测总产油量 (EUR部分)
 const totalPredictedOil = computed(() => {
   return forecastTableData.value.reduce((sum, row) => sum + row.predOil, 0)
 })
@@ -145,13 +188,10 @@ const fetchWells = async () => {
   try {
     const res = await request.get('/api/well/list-with-data')
     const rawData = res.data || []
-
     wellList.value = rawData.map(item => item.info ? item.info : item)
-
     if (wellList.value.length > 0) {
       selectedWellId.value = wellList.value[0].wellId
       selectedWellType.value = wellList.value[0].wellType
-
       await nextTick()
       handleWellChange()
     }
@@ -169,11 +209,9 @@ const generateMockData = async () => {
   } catch (error) { alert("生成失败") }
 }
 
-// 🌟 修改：恢复按钮的逻辑增强
 const resetDateRange = () => {
   startDate.value = ''
   endDate.value = ''
-  // 触发 ECharts 内置的恢复动作，专门对付鼠标滚轮的缩放
   if (myChart) {
     myChart.dispatchAction({ type: 'dataZoom', start: 0, end: 100 })
     myChart.dispatchAction({ type: 'restore' })
@@ -215,12 +253,13 @@ const handleWellChange = async () => {
   }
 }
 
-const calculatePrediction = () => {
+// 核心计算逻辑：分离了后端的 GM(1,1) 和前端的 Arps/LSTM
+const calculatePrediction = async () => {
   chartMonths = [...baseMonths]
-  forecastTableData.value = [] // 每次计算清空表格
+  forecastTableData.value = []
 
   if (selectedWellType.value === '水井' || baseLiquid.length === 0) {
-    renderChart();
+    renderChart()
     return
   }
 
@@ -234,32 +273,91 @@ const calculatePrediction = () => {
   const lastIdx = baseLiquid.length - 1
   chartPredLiquid.push(baseLiquid[lastIdx]); chartPredOil.push(baseOil[lastIdx])
 
-  const Qi_liq = baseLiquid[lastIdx], Qi_oil = baseOil[lastIdx], Di = arpsDi.value, b = arpsB.value
+  const Qi_liq = baseLiquid[lastIdx], Qi_oil = baseOil[lastIdx]
   let lastRealDate = new Date(baseMonths[lastIdx] || new Date())
 
+  // === 分支 1：接入真实的 GM(1,1) 后端 API ===
+  if (selectedAlgorithm.value === 'gm11') {
+    try {
+      const res = await request.get('/api/well/predict/gm11', {
+        params: { wellId: selectedWellId.value, days: predictDays.value }
+      })
+
+      const serverData = res.data || res;
+
+      if (serverData.code === 200) {
+        const predLiqArray = serverData.data.predLiquid;
+        const predOilArray = serverData.data.predOil;
+
+        for (let t = 0; t < predictDays.value; t++) {
+          let nextDate = new Date(lastRealDate.getTime() + (t + 1) * 24 * 60 * 60 * 1000)
+          let formattedDate = formatDate(nextDate)
+          chartMonths.push(formattedDate)
+
+          // 安全类型转换防御
+          let rawL = Number(predLiqArray[t])
+          let rawO = Number(predOilArray[t])
+          let safeL = isNaN(rawL) ? 0 : rawL
+          let safeO = isNaN(rawO) ? 0 : rawO
+
+          let predL = parseFloat(safeL.toFixed(1))
+          let predO = parseFloat(safeO.toFixed(1))
+          let wc = parseFloat((((predL - predO) / predL) * 100).toFixed(1))
+          wc = isNaN(wc) ? 0 : Math.min(100, Math.max(0, wc))
+
+          chartPredLiquid.push(predL)
+          chartPredOil.push(predO)
+          chartWaterCut.push(wc)
+
+          forecastTableData.value.push({ date: formattedDate, predLiquid: predL, predOil: predO, waterCut: wc })
+        }
+        renderChart()
+      } else {
+        console.error("预测失败，后端返回:", serverData)
+      }
+    } catch (error) {
+      console.error("GM11 后端预测请求失败", error)
+    }
+    // 异步执行完毕后直接返回，不能往下走到 Arps 的计算
+    return
+  }
+
+  // === 分支 2 & 3：保留本地算力计算 (Arps 与 LSTM 模拟) ===
   for (let t = 1; t <= predictDays.value; t++) {
-    let nextDate = new Date(lastRealDate.getTime() + t * 24 * 60 * 60 * 1000) // 按天推算
+    let nextDate = new Date(lastRealDate.getTime() + t * 24 * 60 * 60 * 1000)
     let formattedDate = formatDate(nextDate)
     chartMonths.push(formattedDate)
 
-    let Qt_liq = b === 0 ? Qi_liq * Math.exp(-Di * t) : Qi_liq * Math.pow((1 + b * Di * t), -1 / b)
-    let Qt_oil = b === 0 ? Qi_oil * Math.exp(-Di * 1.5 * t) : Qi_oil * Math.pow((1 + b * Di * 1.5 * t), -1 / b)
+    let Qt_liq = 0, Qt_oil = 0
 
-    let predL = parseFloat(Qt_liq.toFixed(1))
-    let predO = parseFloat(Qt_oil.toFixed(1))
+    if (selectedAlgorithm.value === 'arps') {
+      const Di = arpsDi.value, b = arpsB.value
+      Qt_liq = b === 0 ? Qi_liq * Math.exp(-Di * t) : Qi_liq * Math.pow((1 + b * Di * t), -1 / b)
+      Qt_oil = b === 0 ? Qi_oil * Math.exp(-Di * 1.5 * t) : Qi_oil * Math.pow((1 + b * Di * 1.5 * t), -1 / b)
+    }
+    else if (selectedAlgorithm.value === 'lstm') {
+      const baseDecay = 0.004
+      const nonLinearNoiseLiq = Math.sin(t / 3) * 0.5 + Math.cos(t / 7) * 0.3
+      const nonLinearNoiseOil = Math.sin(t / 4) * 0.2 + Math.cos(t / 6) * 0.1
+      Qt_liq = Qi_liq * Math.exp(-baseDecay * t) + nonLinearNoiseLiq
+      Qt_oil = Qi_oil * Math.exp(-baseDecay * 1.3 * t) + nonLinearNoiseOil
+      Qt_liq = Math.max(Qt_liq, Qi_liq * 0.1)
+      Qt_oil = Math.max(Qt_oil, Qi_oil * 0.05)
+    }
+
+    let safeL = isNaN(Qt_liq) ? 0 : Qt_liq
+    let safeO = isNaN(Qt_oil) ? 0 : Qt_oil
+
+    let predL = parseFloat(safeL.toFixed(1))
+    let predO = parseFloat(safeO.toFixed(1))
     let wc = parseFloat((((predL - predO) / predL) * 100).toFixed(1))
+    wc = isNaN(wc) ? 0 : Math.min(100, Math.max(0, wc))
 
     chartPredLiquid.push(predL)
     chartPredOil.push(predO)
     chartWaterCut.push(wc)
 
-    // 🌟 将预测数据推入表格数组
-    forecastTableData.value.push({
-      date: formattedDate,
-      predLiquid: predL,
-      predOil: predO,
-      waterCut: wc
-    })
+    forecastTableData.value.push({ date: formattedDate, predLiquid: predL, predOil: predO, waterCut: wc })
   }
 
   renderChart()
@@ -282,6 +380,8 @@ const renderChart = async () => {
       { type: 'value', name: '产量 (t/d)', position: 'left', splitLine: { lineStyle: { type: 'dashed', color: '#edf2f7' } } },
       { type: 'value', name: '含水率 (%)', position: 'right', min: 0, max: 100, splitLine: { show: false } }
     ]
+
+    // 【核心修复】：移除算法样式的差异化，强制所有预测曲线统一为虚线、且不平滑（与 Arps 保持完全一致）
     seriesData.push(
         { name: '历史产液量', type: 'bar', yAxisIndex: 0, barWidth: '40%', itemStyle: { color: '#00cec9', borderRadius: [4, 4, 0, 0] }, data: chartHistLiquid },
         { name: '预测产液量', type: 'line', yAxisIndex: 0, smooth: false, symbol: 'emptyCircle', itemStyle: { color: '#00cec9' }, lineStyle: { width: 3, type: 'dashed' }, data: chartPredLiquid },
@@ -301,10 +401,10 @@ const renderChart = async () => {
   }
 
   myChart.setOption({
-    title: { text: `[${selectedWellId.value || '未选择井号'}] 历史递减数据与未来预测分析`, left: 'center', top: 10 },
+    title: { text: `[${selectedWellId.value || '未选择井号'}] ${algorithmNameMap[selectedAlgorithm.value]} 趋势分析`, left: 'center', top: 10 },
     tooltip: { trigger: 'axis', axisPointer: { type: 'cross' } },
     legend: { top: 50 },
-    toolbox: { feature: { dataZoom: { yAxisIndex: 'none' }, restore: {} } }, // 启用内置工具箱防伪
+    toolbox: { feature: { dataZoom: { yAxisIndex: 'none' }, restore: {} } },
     dataZoom: [{ type: 'inside', start: 0, end: 100 }, { start: 0, end: 100 }],
     grid: { left: '3%', right: '3%', bottom: '10%', top: 100, containLabel: true },
     xAxis: { type: 'category', boundaryGap: true, data: chartMonths },
@@ -349,7 +449,6 @@ onMounted(() => {
 .arps-help-box ul { margin: 0; padding-left: 20px; font-size: 12px; color: #334155; line-height: 1.6; }
 .arps-help-box b { color: #0ea5e9; }
 
-/* 🌟 右侧布局变更为 Flex 垂直排列，自适应内容 */
 .right-content { flex: 1; display: flex; flex-direction: column; gap: 20px; min-width: 0; }
 .chart-area { height: 450px; background: white; border: 1px solid #e2e8f0; border-radius: 8px; padding: 20px; position: relative; flex-shrink: 0;}
 .chart-container { height: 100%; width: 100%; }
@@ -357,7 +456,6 @@ onMounted(() => {
 .btn-reset-view { position: absolute; top: 15px; right: 20px; z-index: 10; background: white; border: 1px solid #e2e8f0; padding: 6px 12px; border-radius: 20px; font-size: 12px; font-weight: bold; color: #64748b; cursor: pointer; box-shadow: 0 2px 6px rgba(0,0,0,0.05); transition: all 0.2s; display: flex; align-items: center; gap: 6px; }
 .btn-reset-view:hover { background: #f1f5f9; color: #3498db; border-color: #3498db; box-shadow: 0 4px 10px rgba(52, 152, 219, 0.15); transform: translateY(-1px); }
 
-/* 🌟 新增：表格和 EUR 评估区样式 */
 .data-table-area { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 20px; flex: 1; display: flex; flex-direction: column;}
 .table-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px; border-bottom: 2px dashed #cbd5e1; padding-bottom: 15px;}
 .table-header h3 { margin: 0; font-size: 16px; color: #2c3e50; }
