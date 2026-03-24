@@ -6,5 +6,4 @@ import org.apache.ibatis.annotations.Mapper;
 
 @Mapper
 public interface SysWellConnectionMapper extends BaseMapper<SysWellConnection> {
-    // 继承 BaseMapper，直接拥有对 SYS_WELL_CONNECTION 表的所有增删改查超能力！
 }

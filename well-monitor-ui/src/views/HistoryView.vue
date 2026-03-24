@@ -43,7 +43,7 @@
 
           <div class="param-item">
             <label>预测未来时长 (天)</label>
-            <input type="number" v-model.number="predictDays" min="1" max="365" @change="calculatePrediction" class="num-input">
+            <input type="number" v-model.number="predictDays" min="1" max="10000" @change="calculatePrediction" class="num-input">
           </div>
 
           <div v-if="selectedAlgorithm === 'arps'">
@@ -75,7 +75,7 @@
               <h4 style="color: #166534;"><i class="fa-solid fa-circle-nodes"></i> GM(1,1) 真实引擎已接入</h4>
               <ul>
                 <li>基于历史真实数据矩阵进行最小二乘解算。</li>
-                <li>具备算法熔断机制，极端数据自动平滑降级。</li>
+                <li><strong>已接入后端物理机理约束拦截层，保障数据合理性。</strong></li>
               </ul>
             </div>
           </div>
@@ -111,7 +111,7 @@
         <div class="data-table-area" v-if="selectedWellType === '油井' && forecastTableData.length > 0">
           <div class="table-header">
             <h3><i class="fa-solid fa-table-list"></i> 预测数据明细表
-              <span class="subtitle">(基于 {{ algorithmNameMap[selectedAlgorithm] }} 生成)</span>
+              <span class="subtitle">(为保障 Web 渲染性能，表格最多展示前 100 天明细)</span>
             </h3>
             <div class="eur-card">
               <span class="eur-label">未来 {{ predictDays }} 天预估增产油量：</span>
@@ -130,7 +130,7 @@
               </tr>
               </thead>
               <tbody>
-              <tr v-for="(row, index) in forecastTableData" :key="index">
+              <tr v-for="(row, index) in forecastTableData.slice(0, 100)" :key="index">
                 <td><strong>{{ row.date }}</strong></td>
                 <td class="text-liquid">{{ row.predLiquid }}</td>
                 <td class="text-oil"><strong>{{ row.predOil }}</strong></td>
@@ -253,12 +253,14 @@ const handleWellChange = async () => {
   }
 }
 
-// 核心计算逻辑：分离了后端的 GM(1,1) 和前端的 Arps/LSTM
+// 核心计算逻辑
 const calculatePrediction = async () => {
   chartMonths = [...baseMonths]
-  forecastTableData.value = []
+  // 性能优化：临时数组脱离 Vue 的响应式劫持
+  let tempTableData = []
 
   if (selectedWellType.value === '水井' || baseLiquid.length === 0) {
+    forecastTableData.value = []
     renderChart()
     return
   }
@@ -276,7 +278,7 @@ const calculatePrediction = async () => {
   const Qi_liq = baseLiquid[lastIdx], Qi_oil = baseOil[lastIdx]
   let lastRealDate = new Date(baseMonths[lastIdx] || new Date())
 
-  // === 分支 1：接入真实的 GM(1,1) 后端 API ===
+  // === 分支 1：接入完全由后端约束的真实 GM(1,1) API ===
   if (selectedAlgorithm.value === 'gm11') {
     try {
       const res = await request.get('/api/well/predict/gm11', {
@@ -294,31 +296,27 @@ const calculatePrediction = async () => {
           let formattedDate = formatDate(nextDate)
           chartMonths.push(formattedDate)
 
-          // 安全类型转换防御
           let rawL = Number(predLiqArray[t])
           let rawO = Number(predOilArray[t])
-          let safeL = isNaN(rawL) ? 0 : rawL
-          let safeO = isNaN(rawO) ? 0 : rawO
 
-          let predL = parseFloat(safeL.toFixed(1))
-          let predO = parseFloat(safeO.toFixed(1))
-          let wc = parseFloat((((predL - predO) / predL) * 100).toFixed(1))
-          wc = isNaN(wc) ? 0 : Math.min(100, Math.max(0, wc))
+          // 前端只负责格式化渲染，信任后端的物理机理约束结果
+          let predL = parseFloat((isNaN(rawL) ? 0 : rawL).toFixed(1))
+          let predO = parseFloat((isNaN(rawO) ? 0 : rawO).toFixed(1))
+          let wc = parseFloat((predL > 0 ? ((predL - predO) / predL) * 100 : 0).toFixed(1))
 
           chartPredLiquid.push(predL)
           chartPredOil.push(predO)
           chartWaterCut.push(wc)
 
-          forecastTableData.value.push({ date: formattedDate, predLiquid: predL, predOil: predO, waterCut: wc })
+          tempTableData.push({ date: formattedDate, predLiquid: predL, predOil: predO, waterCut: wc })
         }
+        // 性能优化：一次性给 Vue 的响应式变量赋值，避免频繁 DOM 重绘
+        forecastTableData.value = tempTableData;
         renderChart()
-      } else {
-        console.error("预测失败，后端返回:", serverData)
       }
     } catch (error) {
       console.error("GM11 后端预测请求失败", error)
     }
-    // 异步执行完毕后直接返回，不能往下走到 Arps 的计算
     return
   }
 
@@ -357,9 +355,10 @@ const calculatePrediction = async () => {
     chartPredOil.push(predO)
     chartWaterCut.push(wc)
 
-    forecastTableData.value.push({ date: formattedDate, predLiquid: predL, predOil: predO, waterCut: wc })
+    tempTableData.push({ date: formattedDate, predLiquid: predL, predOil: predO, waterCut: wc })
   }
 
+  forecastTableData.value = tempTableData;
   renderChart()
 }
 
@@ -381,13 +380,15 @@ const renderChart = async () => {
       { type: 'value', name: '含水率 (%)', position: 'right', min: 0, max: 100, splitLine: { show: false } }
     ]
 
-    // 【核心修复】：移除算法样式的差异化，强制所有预测曲线统一为虚线、且不平滑（与 Arps 保持完全一致）
+    // 动态感知节点规模，当点数大于 100 时关闭 Symbol 圆点，并依赖后方 sampling 的降采样算法
+    const shouldShowSymbol = (predictDays.value + baseLiquid.length) <= 100;
+
     seriesData.push(
         { name: '历史产液量', type: 'bar', yAxisIndex: 0, barWidth: '40%', itemStyle: { color: '#00cec9', borderRadius: [4, 4, 0, 0] }, data: chartHistLiquid },
-        { name: '预测产液量', type: 'line', yAxisIndex: 0, smooth: false, symbol: 'emptyCircle', itemStyle: { color: '#00cec9' }, lineStyle: { width: 3, type: 'dashed' }, data: chartPredLiquid },
-        { name: '历史产油量', type: 'line', yAxisIndex: 0, smooth: true, itemStyle: { color: '#e17055' }, lineStyle: { width: 3 }, data: chartHistOil },
-        { name: '预测产油量', type: 'line', yAxisIndex: 0, smooth: false, itemStyle: { color: '#e17055' }, lineStyle: { width: 3, type: 'dashed' }, data: chartPredOil },
-        { name: '综合含水率', type: 'line', yAxisIndex: 1, smooth: true, itemStyle: { color: '#3498db' }, lineStyle: { width: 2, type: 'dotted' }, data: chartWaterCut }
+        { name: '预测产液量', type: 'line', yAxisIndex: 0, smooth: false, showSymbol: shouldShowSymbol, sampling: 'lttb', itemStyle: { color: '#00cec9' }, lineStyle: { width: 3, type: 'dashed' }, data: chartPredLiquid },
+        { name: '历史产油量', type: 'line', yAxisIndex: 0, smooth: true, showSymbol: shouldShowSymbol, sampling: 'lttb', itemStyle: { color: '#e17055' }, lineStyle: { width: 3 }, data: chartHistOil },
+        { name: '预测产油量', type: 'line', yAxisIndex: 0, smooth: false, showSymbol: shouldShowSymbol, sampling: 'lttb', itemStyle: { color: '#e17055' }, lineStyle: { width: 3, type: 'dashed' }, data: chartPredOil },
+        { name: '综合含水率', type: 'line', yAxisIndex: 1, smooth: true, showSymbol: shouldShowSymbol, sampling: 'lttb', itemStyle: { color: '#3498db' }, lineStyle: { width: 2, type: 'dotted' }, data: chartWaterCut }
     )
   } else {
     yAxisConfig = [
@@ -459,7 +460,7 @@ onMounted(() => {
 .data-table-area { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 20px; flex: 1; display: flex; flex-direction: column;}
 .table-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px; border-bottom: 2px dashed #cbd5e1; padding-bottom: 15px;}
 .table-header h3 { margin: 0; font-size: 16px; color: #2c3e50; }
-.subtitle { font-size: 12px; color: #94a3b8; font-weight: normal; margin-left: 8px;}
+.subtitle { font-size: 12px; color: #e74c3c; font-weight: normal; margin-left: 8px;}
 .eur-card { background: #fff5f5; border: 1px solid #fecaca; padding: 8px 16px; border-radius: 30px; display: flex; align-items: center; gap: 10px; box-shadow: 0 2px 8px rgba(239, 68, 68, 0.1);}
 .eur-label { font-size: 13px; color: #ef4444; font-weight: bold;}
 .eur-value { font-size: 20px; font-weight: 900; color: #b91c1c;}
