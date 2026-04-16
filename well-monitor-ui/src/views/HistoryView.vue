@@ -47,20 +47,31 @@
           </div>
 
           <div v-if="selectedAlgorithm === 'arps'">
+
             <div class="param-item slider-item">
               <div class="label-row">
                 <label>初始日递减率 Di</label>
-                <span class="value">{{ (arpsDi * 100).toFixed(2) }} %</span>
+                <div class="stepper-group">
+                  <button class="step-btn" @click="adjustArpsDi(-0.0001)"><i class="fa-solid fa-minus"></i></button>
+                  <span class="value">{{ (arpsDi * 100).toFixed(2) }} %</span>
+                  <button class="step-btn" @click="adjustArpsDi(0.0001)"><i class="fa-solid fa-plus"></i></button>
+                </div>
               </div>
               <input type="range" v-model.number="arpsDi" min="0.0001" max="0.05" step="0.0001" @input="calculatePrediction">
             </div>
+
             <div class="param-item slider-item">
               <div class="label-row">
                 <label>递减指数 b</label>
-                <span class="value">{{ arpsB.toFixed(2) }}</span>
+                <div class="stepper-group">
+                  <button class="step-btn" @click="adjustArpsB(-0.01)"><i class="fa-solid fa-minus"></i></button>
+                  <span class="value">{{ arpsB.toFixed(2) }}</span>
+                  <button class="step-btn" @click="adjustArpsB(0.01)"><i class="fa-solid fa-plus"></i></button>
+                </div>
               </div>
               <input type="range" v-model.number="arpsB" min="0" max="1" step="0.01" @input="calculatePrediction">
             </div>
+
             <div class="arps-help-box">
               <h4><i class="fa-solid fa-lightbulb"></i> Arps 参数调校</h4>
               <ul>
@@ -83,16 +94,17 @@
           <div v-if="selectedAlgorithm === 'lstm'">
             <div class="param-item">
               <label>Time Steps (时间步)</label>
-              <input type="number" value="7" disabled class="num-input" style="background: #f1f5f9;">
+              <input type="number" v-model.number="lstmTimeSteps" @change="calculatePrediction" min="1" class="num-input">
             </div>
             <div class="param-item">
               <label>Epochs (训练轮数)</label>
-              <input type="number" value="200" disabled class="num-input" style="background: #f1f5f9;">
+              <input type="number" v-model.number="lstmEpochs" @change="calculatePrediction" step="50" min="50" class="num-input">
             </div>
             <div class="arps-help-box" style="background: #f5f3ff; border-color: #ddd6fe;">
-              <h4 style="color: #5b21b6;"><i class="fa-solid fa-network-wired"></i> LSTM 深度学习</h4>
+              <h4 style="color: #5b21b6;"><i class="fa-solid fa-network-wired"></i> LSTM 微服务已接管</h4>
               <ul>
-                <li>当前为前端系统模拟演算，后续计划接入 Python 服务。</li>
+                <li>前端不进行计算，通过 API 请求 Spring Boot。</li>
+                <li>Spring Boot 封装数据后，调用 Python FastAPI 进行预测。</li>
               </ul>
             </div>
           </div>
@@ -169,6 +181,9 @@ const predictDays = ref(30)
 const arpsDi = ref(0.005)
 const arpsB = ref(0.3)
 
+const lstmTimeSteps = ref(7)
+const lstmEpochs = ref(200)
+
 let baseMonths = [], baseLiquid = [], baseOil = [], baseWaterCut = [], baseInject = [], basePressure = []
 let chartMonths = [], chartHistLiquid = [], chartPredLiquid = [], chartHistOil = [], chartPredOil = [], chartWaterCut = []
 
@@ -182,6 +197,24 @@ const formatDate = (dateStr) => {
   if (!dateStr) return ''
   const d = new Date(dateStr)
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
+
+// 🌟 新增：处理精度问题的微调函数 🌟
+const adjustArpsDi = (delta) => {
+  // 利用乘除法消除浮点数加减的精度丢失问题
+  let newVal = Math.round((arpsDi.value + delta) * 10000) / 10000;
+  if (newVal >= 0.0001 && newVal <= 0.05) {
+    arpsDi.value = newVal;
+    calculatePrediction();
+  }
+}
+
+const adjustArpsB = (delta) => {
+  let newVal = Math.round((arpsB.value + delta) * 100) / 100;
+  if (newVal >= 0 && newVal <= 1) {
+    arpsB.value = newVal;
+    calculatePrediction();
+  }
 }
 
 const fetchWells = async () => {
@@ -256,7 +289,6 @@ const handleWellChange = async () => {
 // 核心计算逻辑
 const calculatePrediction = async () => {
   chartMonths = [...baseMonths]
-  // 性能优化：临时数组脱离 Vue 的响应式劫持
   let tempTableData = []
 
   if (selectedWellType.value === '水井' || baseLiquid.length === 0) {
@@ -278,11 +310,17 @@ const calculatePrediction = async () => {
   const Qi_liq = baseLiquid[lastIdx], Qi_oil = baseOil[lastIdx]
   let lastRealDate = new Date(baseMonths[lastIdx] || new Date())
 
-  // === 分支 1：接入完全由后端约束的真实 GM(1,1) API ===
-  if (selectedAlgorithm.value === 'gm11') {
+  // === 分支 1：接入真实的后端算法 API (GM1,1 与 LSTM) ===
+  if (selectedAlgorithm.value === 'gm11' || selectedAlgorithm.value === 'lstm') {
     try {
-      const res = await request.get('/api/well/predict/gm11', {
-        params: { wellId: selectedWellId.value, days: predictDays.value }
+      const requestParams = { wellId: selectedWellId.value, days: predictDays.value }
+      if (selectedAlgorithm.value === 'lstm') {
+        requestParams.timeSteps = lstmTimeSteps.value;
+        requestParams.epochs = lstmEpochs.value;
+      }
+
+      const res = await request.get(`/api/well/predict/${selectedAlgorithm.value}`, {
+        params: requestParams
       })
 
       const serverData = res.data || res;
@@ -299,7 +337,6 @@ const calculatePrediction = async () => {
           let rawL = Number(predLiqArray[t])
           let rawO = Number(predOilArray[t])
 
-          // 前端只负责格式化渲染，信任后端的物理机理约束结果
           let predL = parseFloat((isNaN(rawL) ? 0 : rawL).toFixed(1))
           let predO = parseFloat((isNaN(rawO) ? 0 : rawO).toFixed(1))
           let wc = parseFloat((predL > 0 ? ((predL - predO) / predL) * 100 : 0).toFixed(1))
@@ -310,17 +347,20 @@ const calculatePrediction = async () => {
 
           tempTableData.push({ date: formattedDate, predLiquid: predL, predOil: predO, waterCut: wc })
         }
-        // 性能优化：一次性给 Vue 的响应式变量赋值，避免频繁 DOM 重绘
+
         forecastTableData.value = tempTableData;
         renderChart()
+      } else {
+        alert(serverData.msg || "后端预测请求失败");
       }
     } catch (error) {
-      console.error("GM11 后端预测请求失败", error)
+      console.error("调用预测接口失败:", error)
+      alert(`无法连接到预测服务，请确保 Spring Boot 已运行！`);
     }
     return
   }
 
-  // === 分支 2 & 3：保留本地算力计算 (Arps 与 LSTM 模拟) ===
+  // === 分支 2：保留本地算力计算 (Arps 模拟) ===
   for (let t = 1; t <= predictDays.value; t++) {
     let nextDate = new Date(lastRealDate.getTime() + t * 24 * 60 * 60 * 1000)
     let formattedDate = formatDate(nextDate)
@@ -332,15 +372,6 @@ const calculatePrediction = async () => {
       const Di = arpsDi.value, b = arpsB.value
       Qt_liq = b === 0 ? Qi_liq * Math.exp(-Di * t) : Qi_liq * Math.pow((1 + b * Di * t), -1 / b)
       Qt_oil = b === 0 ? Qi_oil * Math.exp(-Di * 1.5 * t) : Qi_oil * Math.pow((1 + b * Di * 1.5 * t), -1 / b)
-    }
-    else if (selectedAlgorithm.value === 'lstm') {
-      const baseDecay = 0.004
-      const nonLinearNoiseLiq = Math.sin(t / 3) * 0.5 + Math.cos(t / 7) * 0.3
-      const nonLinearNoiseOil = Math.sin(t / 4) * 0.2 + Math.cos(t / 6) * 0.1
-      Qt_liq = Qi_liq * Math.exp(-baseDecay * t) + nonLinearNoiseLiq
-      Qt_oil = Qi_oil * Math.exp(-baseDecay * 1.3 * t) + nonLinearNoiseOil
-      Qt_liq = Math.max(Qt_liq, Qi_liq * 0.1)
-      Qt_oil = Math.max(Qt_oil, Qi_oil * 0.05)
     }
 
     let safeL = isNaN(Qt_liq) ? 0 : Qt_liq
@@ -376,39 +407,109 @@ const renderChart = async () => {
 
   if (selectedWellType.value === '油井') {
     yAxisConfig = [
-      { type: 'value', name: '产量 (t/d)', position: 'left', splitLine: { lineStyle: { type: 'dashed', color: '#edf2f7' } } },
-      { type: 'value', name: '含水率 (%)', position: 'right', min: 0, max: 100, splitLine: { show: false } }
+      {type: 'value', name: '产量 (t/d)', position: 'left', splitLine: {lineStyle: {type: 'dashed', color: '#edf2f7'}}},
+      {type: 'value', name: '含水率 (%)', position: 'right', min: 0, max: 100, splitLine: {show: false}}
     ]
 
-    // 动态感知节点规模，当点数大于 100 时关闭 Symbol 圆点，并依赖后方 sampling 的降采样算法
     const shouldShowSymbol = (predictDays.value + baseLiquid.length) <= 100;
 
     seriesData.push(
-        { name: '历史产液量', type: 'bar', yAxisIndex: 0, barWidth: '40%', itemStyle: { color: '#00cec9', borderRadius: [4, 4, 0, 0] }, data: chartHistLiquid },
-        { name: '预测产液量', type: 'line', yAxisIndex: 0, smooth: false, showSymbol: shouldShowSymbol, sampling: 'lttb', itemStyle: { color: '#00cec9' }, lineStyle: { width: 3, type: 'dashed' }, data: chartPredLiquid },
-        { name: '历史产油量', type: 'line', yAxisIndex: 0, smooth: true, showSymbol: shouldShowSymbol, sampling: 'lttb', itemStyle: { color: '#e17055' }, lineStyle: { width: 3 }, data: chartHistOil },
-        { name: '预测产油量', type: 'line', yAxisIndex: 0, smooth: false, showSymbol: shouldShowSymbol, sampling: 'lttb', itemStyle: { color: '#e17055' }, lineStyle: { width: 3, type: 'dashed' }, data: chartPredOil },
-        { name: '综合含水率', type: 'line', yAxisIndex: 1, smooth: true, showSymbol: shouldShowSymbol, sampling: 'lttb', itemStyle: { color: '#3498db' }, lineStyle: { width: 2, type: 'dotted' }, data: chartWaterCut }
+        {
+          name: '历史产液量',
+          type: 'bar',
+          yAxisIndex: 0,
+          barWidth: '40%',
+          itemStyle: {color: '#00cec9', borderRadius: [4, 4, 0, 0]},
+          data: chartHistLiquid
+        },
+        {
+          name: '预测产液量',
+          type: 'line',
+          yAxisIndex: 0,
+          smooth: false,
+          showSymbol: shouldShowSymbol,
+          sampling: 'lttb',
+          itemStyle: {color: '#00cec9'},
+          lineStyle: {width: 3, type: 'dashed'},
+          data: chartPredLiquid
+        },
+        {
+          name: '历史产油量',
+          type: 'line',
+          yAxisIndex: 0,
+          smooth: true,
+          showSymbol: shouldShowSymbol,
+          sampling: 'lttb',
+          itemStyle: {color: '#e17055'},
+          lineStyle: {width: 3},
+          data: chartHistOil
+        },
+        {
+          name: '预测产油量',
+          type: 'line',
+          yAxisIndex: 0,
+          smooth: false,
+          showSymbol: shouldShowSymbol,
+          sampling: 'lttb',
+          itemStyle: {color: '#e17055'},
+          lineStyle: {width: 3, type: 'dashed'},
+          data: chartPredOil
+        },
+        {
+          name: '综合含水率',
+          type: 'line',
+          yAxisIndex: 1,
+          smooth: true,
+          showSymbol: shouldShowSymbol,
+          sampling: 'lttb',
+          itemStyle: {color: '#3498db'},
+          lineStyle: {width: 2, type: 'dotted'},
+          data: chartWaterCut
+        }
     )
   } else {
     yAxisConfig = [
-      { type: 'value', name: '注水量 (m³/d)', position: 'left', splitLine: { lineStyle: { type: 'dashed', color: '#edf2f7' } } },
-      { type: 'value', name: '注水压力 (MPa)', position: 'right', splitLine: { show: false } }
+      {
+        type: 'value',
+        name: '注水量 (m³/d)',
+        position: 'left',
+        splitLine: {lineStyle: {type: 'dashed', color: '#edf2f7'}}
+      },
+      {type: 'value', name: '注水压力 (MPa)', position: 'right', splitLine: {show: false}}
     ]
     seriesData.push(
-        { name: '历史注水量', type: 'bar', yAxisIndex: 0, barWidth: '40%', itemStyle: { color: '#3498db', borderRadius: [4, 4, 0, 0] }, data: baseInject },
-        { name: '历史注水压力', type: 'line', yAxisIndex: 1, smooth: true, itemStyle: { color: '#e74c3c' }, lineStyle: { width: 3 }, data: basePressure }
+        {
+          name: '历史注水量',
+          type: 'bar',
+          yAxisIndex: 0,
+          barWidth: '40%',
+          itemStyle: {color: '#3498db', borderRadius: [4, 4, 0, 0]},
+          data: baseInject
+        },
+        {
+          name: '历史注水压力',
+          type: 'line',
+          yAxisIndex: 1,
+          smooth: true,
+          itemStyle: {color: '#e74c3c'},
+          lineStyle: {width: 3},
+          data: basePressure
+        }
     )
   }
 
   myChart.setOption({
-    title: { text: `[${selectedWellId.value || '未选择井号'}] ${algorithmNameMap[selectedAlgorithm.value]} 趋势分析`, left: 'center', top: 10 },
-    tooltip: { trigger: 'axis', axisPointer: { type: 'cross' } },
-    legend: { top: 50 },
-    toolbox: { feature: { dataZoom: { yAxisIndex: 'none' }, restore: {} } },
-    dataZoom: [{ type: 'inside', start: 0, end: 100 }, { start: 0, end: 100 }],
-    grid: { left: '3%', right: '3%', bottom: '10%', top: 100, containLabel: true },
-    xAxis: { type: 'category', boundaryGap: true, data: chartMonths },
+    title: {
+      text: `[${selectedWellId.value || '未选择井号'}] ${algorithmNameMap[selectedAlgorithm.value]} 趋势分析`,
+      left: 'center',
+      top: 10
+    },
+    tooltip: {trigger: 'axis', axisPointer: {type: 'cross'}},
+    legend: {top: 50},
+    toolbox: {feature: {dataZoom: {yAxisIndex: 'none'}, restore: {}}},
+    dataZoom: [{type: 'inside', start: 0, end: 100}, {start: 0, end: 100}],
+    grid: {left: '3%', right: '3%', bottom: '10%', top: 100, containLabel: true},
+    xAxis: {type: 'category', boundaryGap: true, data: chartMonths},
     yAxis: yAxisConfig,
     series: seriesData
   })
@@ -416,66 +517,384 @@ const renderChart = async () => {
 
 onMounted(() => {
   fetchWells()
-  window.addEventListener('resize', () => { myChart?.resize() })
+  window.addEventListener('resize', () => {
+    myChart?.resize()
+  })
 })
 </script>
 
 <style scoped>
-.panel { background-color: #ffffff; border-radius: 12px; box-shadow: 0 4px 20px rgba(0,0,0,0.04); padding: 24px; min-height: calc(100vh - 112px); box-sizing: border-box; }
-.panel-title { margin-top: 0; margin-bottom: 24px; font-size: 20px; color: var(--primary-color); border-bottom: 2px solid #f0f4f8; padding-bottom: 12px; }
-.analysis-layout { display: flex; gap: 24px;}
-.config-panel { flex: 0 0 320px; display: flex; flex-direction: column; gap: 20px;}
-.config-section { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 18px;}
-.config-section h3 { margin-top: 0; margin-bottom: 16px; font-size: 15px; color: var(--primary-color); display: flex; align-items: center; gap: 8px;}
-.full-select { width: 100%; padding: 10px; border: 1px solid #bdc3c7; border-radius: 6px; font-size: 14px; outline: none;}
-.num-input { width: 80px; padding: 8px; border: 1px solid #bdc3c7; border-radius: 6px;}
-.param-item { margin-bottom: 16px; display: flex; justify-content: space-between; align-items: center; }
-.param-item label { font-size: 13px; color: #555; }
-.date-input { width: 135px; padding: 6px; border: 1px solid #bdc3c7; border-radius: 6px; font-size: 13px; }
+.panel {
+  background-color: #ffffff;
+  border-radius: 12px;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.04);
+  padding: 24px;
+  min-height: calc(100vh - 112px);
+  box-sizing: border-box;
+}
 
-.btn-group { display: flex; gap: 10px; margin-top: 20px; }
-.query-btn, .mock-btn { flex: 1; padding: 10px 0; border: none; border-radius: 6px; color: white; cursor: pointer; font-size: 13px; font-weight: bold; transition: 0.2s;}
-.query-btn { background: var(--primary-color, #3498db); }
-.query-btn:hover { background: #2980b9; }
-.mock-btn { background: #e67e22; }
-.mock-btn:hover { background: #d35400; }
+.panel-title {
+  margin-top: 0;
+  margin-bottom: 24px;
+  font-size: 20px;
+  color: var(--primary-color);
+  border-bottom: 2px solid #f0f4f8;
+  padding-bottom: 12px;
+}
 
-.slider-item { flex-direction: column; align-items: flex-start;}
-.label-row { display: flex; justify-content: space-between; width: 100%; margin-bottom: 6px;}
-.slider-item .value { font-size: 13px; color: #e67e22; font-weight: bold;}
-.slider-item input[type="range"] { width: 100%; cursor: pointer; accent-color: var(--primary-color); }
+.analysis-layout {
+  display: flex;
+  gap: 24px;
+}
 
-.arps-help-box { margin-top: 20px; background: #e0f2fe; padding: 12px; border-radius: 6px; border: 1px solid #bae6fd;}
-.arps-help-box h4 { margin: 0 0 8px 0; font-size: 13px; color: #0284c7; display: flex; align-items: center; gap: 6px; }
-.arps-help-box ul { margin: 0; padding-left: 20px; font-size: 12px; color: #334155; line-height: 1.6; }
-.arps-help-box b { color: #0ea5e9; }
+.config-panel {
+  flex: 0 0 320px;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
 
-.right-content { flex: 1; display: flex; flex-direction: column; gap: 20px; min-width: 0; }
-.chart-area { height: 450px; background: white; border: 1px solid #e2e8f0; border-radius: 8px; padding: 20px; position: relative; flex-shrink: 0;}
-.chart-container { height: 100%; width: 100%; }
+.config-section {
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  padding: 18px;
+}
 
-.btn-reset-view { position: absolute; top: 15px; right: 20px; z-index: 10; background: white; border: 1px solid #e2e8f0; padding: 6px 12px; border-radius: 20px; font-size: 12px; font-weight: bold; color: #64748b; cursor: pointer; box-shadow: 0 2px 6px rgba(0,0,0,0.05); transition: all 0.2s; display: flex; align-items: center; gap: 6px; }
-.btn-reset-view:hover { background: #f1f5f9; color: #3498db; border-color: #3498db; box-shadow: 0 4px 10px rgba(52, 152, 219, 0.15); transform: translateY(-1px); }
+.config-section h3 {
+  margin-top: 0;
+  margin-bottom: 16px;
+  font-size: 15px;
+  color: var(--primary-color);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
 
-.data-table-area { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 20px; flex: 1; display: flex; flex-direction: column;}
-.table-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px; border-bottom: 2px dashed #cbd5e1; padding-bottom: 15px;}
-.table-header h3 { margin: 0; font-size: 16px; color: #2c3e50; }
-.subtitle { font-size: 12px; color: #e74c3c; font-weight: normal; margin-left: 8px;}
-.eur-card { background: #fff5f5; border: 1px solid #fecaca; padding: 8px 16px; border-radius: 30px; display: flex; align-items: center; gap: 10px; box-shadow: 0 2px 8px rgba(239, 68, 68, 0.1);}
-.eur-label { font-size: 13px; color: #ef4444; font-weight: bold;}
-.eur-value { font-size: 20px; font-weight: 900; color: #b91c1c;}
-.eur-value small { font-size: 12px; font-weight: normal;}
+.full-select {
+  width: 100%;
+  padding: 10px;
+  border: 1px solid #bdc3c7;
+  border-radius: 6px;
+  font-size: 14px;
+  outline: none;
+}
 
-.table-wrapper { flex: 1; overflow-y: auto; max-height: 250px; background: white; border: 1px solid #e2e8f0; border-radius: 6px; }
-.table-wrapper::-webkit-scrollbar { width: 6px; }
-.table-wrapper::-webkit-scrollbar-thumb { background-color: #cbd5e1; border-radius: 10px; }
+.num-input {
+  width: 80px;
+  padding: 8px;
+  border: 1px solid #bdc3c7;
+  border-radius: 6px;
+}
 
-.forecast-table { width: 100%; border-collapse: collapse; text-align: center; font-size: 13px;}
-.forecast-table th { background: #f1f5f9; color: #475569; padding: 10px; position: sticky; top: 0; z-index: 1; border-bottom: 1px solid #cbd5e1; font-weight: bold;}
-.forecast-table td { padding: 10px; border-bottom: 1px solid #f1f5f9; color: #334155; }
-.forecast-table tr:hover { background-color: #f8fafc; }
+.param-item {
+  margin-bottom: 16px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
 
-.text-liquid { color: #00cec9; }
-.text-oil { color: #e17055; font-size: 14px;}
-.text-water { color: #3498db; }
+.param-item label {
+  font-size: 13px;
+  color: #555;
+}
+
+.date-input {
+  width: 135px;
+  padding: 6px;
+  border: 1px solid #bdc3c7;
+  border-radius: 6px;
+  font-size: 13px;
+}
+
+.btn-group {
+  display: flex;
+  gap: 10px;
+  margin-top: 20px;
+}
+
+.query-btn, .mock-btn {
+  flex: 1;
+  padding: 10px 0;
+  border: none;
+  border-radius: 6px;
+  color: white;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: bold;
+  transition: 0.2s;
+}
+
+.query-btn {
+  background: var(--primary-color, #3498db);
+}
+
+.query-btn:hover {
+  background: #2980b9;
+}
+
+.mock-btn {
+  background: #e67e22;
+}
+
+.mock-btn:hover {
+  background: #d35400;
+}
+
+.slider-item {
+  flex-direction: column;
+  align-items: flex-start;
+}
+
+.label-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  width: 100%;
+  margin-bottom: 8px;
+}
+
+.slider-item input[type="range"] {
+  width: 100%;
+  cursor: pointer;
+  accent-color: var(--primary-color);
+}
+
+/* 🌟 新增的微调步进器样式 🌟 */
+.stepper-group {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  background: #ffffff;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  padding: 2px 4px;
+}
+
+.step-btn {
+  background: transparent;
+  border: none;
+  color: #94a3b8;
+  cursor: pointer;
+  width: 22px;
+  height: 22px;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  transition: all 0.2s;
+}
+
+.step-btn:hover {
+  background: #f1f5f9;
+  color: var(--primary-color, #3498db);
+}
+
+.stepper-group .value {
+  font-size: 12px;
+  color: #e67e22;
+  font-weight: 800;
+  min-width: 48px;
+  text-align: center;
+}
+
+.arps-help-box {
+  margin-top: 20px;
+  background: #e0f2fe;
+  padding: 12px;
+  border-radius: 6px;
+  border: 1px solid #bae6fd;
+}
+
+.arps-help-box h4 {
+  margin: 0 0 8px 0;
+  font-size: 13px;
+  color: #0284c7;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.arps-help-box ul {
+  margin: 0;
+  padding-left: 20px;
+  font-size: 12px;
+  color: #334155;
+  line-height: 1.6;
+}
+
+.arps-help-box b {
+  color: #0ea5e9;
+}
+
+.right-content {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  min-width: 0;
+}
+
+.chart-area {
+  height: 450px;
+  background: white;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  padding: 20px;
+  position: relative;
+  flex-shrink: 0;
+}
+
+.chart-container {
+  height: 100%;
+  width: 100%;
+}
+
+.btn-reset-view {
+  position: absolute;
+  top: 15px;
+  right: 20px;
+  z-index: 10;
+  background: white;
+  border: 1px solid #e2e8f0;
+  padding: 6px 12px;
+  border-radius: 20px;
+  font-size: 12px;
+  font-weight: bold;
+  color: #64748b;
+  cursor: pointer;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.05);
+  transition: all 0.2s;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.btn-reset-view:hover {
+  background: #f1f5f9;
+  color: #3498db;
+  border-color: #3498db;
+  box-shadow: 0 4px 10px rgba(52, 152, 219, 0.15);
+  transform: translateY(-1px);
+}
+
+.data-table-area {
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  padding: 20px;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+}
+
+.table-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 15px;
+  border-bottom: 2px dashed #cbd5e1;
+  padding-bottom: 15px;
+}
+
+.table-header h3 {
+  margin: 0;
+  font-size: 16px;
+  color: #2c3e50;
+}
+
+.subtitle {
+  font-size: 12px;
+  color: #e74c3c;
+  font-weight: normal;
+  margin-left: 8px;
+}
+
+.eur-card {
+  background: #fff5f5;
+  border: 1px solid #fecaca;
+  padding: 8px 16px;
+  border-radius: 30px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  box-shadow: 0 2px 8px rgba(239, 68, 68, 0.1);
+}
+
+.eur-label {
+  font-size: 13px;
+  color: #ef4444;
+  font-weight: bold;
+}
+
+.eur-value {
+  font-size: 20px;
+  font-weight: 900;
+  color: #b91c1c;
+}
+
+.eur-value small {
+  font-size: 12px;
+  font-weight: normal;
+}
+
+.table-wrapper {
+  flex: 1;
+  overflow-y: auto;
+  max-height: 250px;
+  background: white;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+}
+
+.table-wrapper::-webkit-scrollbar {
+  width: 6px;
+}
+
+.table-wrapper::-webkit-scrollbar-thumb {
+  background-color: #cbd5e1;
+  border-radius: 10px;
+}
+
+.forecast-table {
+  width: 100%;
+  border-collapse: collapse;
+  text-align: center;
+  font-size: 13px;
+}
+
+.forecast-table th {
+  background: #f1f5f9;
+  color: #475569;
+  padding: 10px;
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  border-bottom: 1px solid #cbd5e1;
+  font-weight: bold;
+}
+
+.forecast-table td {
+  padding: 10px;
+  border-bottom: 1px solid #f1f5f9;
+  color: #334155;
+}
+
+.forecast-table tr:hover {
+  background-color: #f8fafc;
+}
+
+.text-liquid {
+  color: #00cec9;
+}
+
+.text-oil {
+  color: #e17055;
+  font-size: 14px;
+}
+
+.text-water {
+  color: #3498db;
+}
 </style>

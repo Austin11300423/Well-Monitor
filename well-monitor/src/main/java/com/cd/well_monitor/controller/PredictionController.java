@@ -5,8 +5,11 @@ import com.cd.well_monitor.entity.SysWellProduction;
 import com.cd.well_monitor.mapper.SysWellProductionMapper;
 import com.cd.well_monitor.utils.PredictAlgorithmUtil;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.client.RestTemplate;
 
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -18,9 +21,14 @@ public class PredictionController {
     @Autowired
     private SysWellProductionMapper productionMapper;
 
+    // 初始化一个 RestTemplate，用于发送 HTTP 请求给 Python 微服务
+    private final RestTemplate restTemplate = new RestTemplate();
+
+    // ==========================================
+    // GM(1,1) 预测接口
+    // ==========================================
     @GetMapping("/gm11")
     public Map<String, Object> predictGM11(@RequestParam String wellId, @RequestParam int days) {
-        // 1. 获取历史生产数据
         QueryWrapper<SysWellProduction> wrapper = new QueryWrapper<>();
         wrapper.eq("WELL_ID", wellId).orderByAsc("RECORD_DATE");
         List<SysWellProduction> history = productionMapper.selectList(wrapper);
@@ -36,61 +44,12 @@ public class PredictionController {
             oilData[i] = prod.getOilVol() == null ? 0.0 : prod.getOilVol();
         }
 
-        // 2. 调用核心算法进行纯数学预测
         double[] predLiquid = PredictAlgorithmUtil.predictGM11(liquidData, days);
         double[] predOil = PredictAlgorithmUtil.predictGM11(oilData, days);
 
-        // 🌟🌟 3. 核心修复：溯源寻找【真正的正常生产基准】，跳过模拟器生成的停机异常 🌟🌟
-        double validLastLiq = 10.0; // 兜底安全值
-        double validLastOil = 2.0;  // 兜底安全值
+        // 应用物理机理约束
+        applyPhysicalConstraints(liquidData, oilData, predLiquid, predOil, sampleSize, days);
 
-        // 倒序遍历，寻找最近一天【非零、非异常】的真实产量
-        for (int i = sampleSize - 1; i >= 0; i--) {
-            if (liquidData[i] > 1.0 && oilData[i] > 0.1) {
-                validLastLiq = liquidData[i];
-                validLastOil = oilData[i];
-                break; // 找到了正常的基准，立刻停止回溯
-            }
-        }
-
-        // 用找到的【正常天】计算初始含水率基准，绝不会再是 100%
-        double baseWC = ((validLastLiq - validLastOil) / validLastLiq) * 100.0;
-
-        for (int i = 0; i < days; i++) {
-            double pLiq = predLiquid[i];
-
-            // 防护 1：如果数学模型把产液量预测得太低（比如跌破基准的50%），强行用平滑衰减接管，防止分母过小导致含水率计算崩溃
-            if (pLiq < validLastLiq * 0.5) {
-                pLiq = validLastLiq * Math.exp(-0.002 * (i + 1));
-                predLiquid[i] = pLiq;
-            }
-
-            double pOil = predOil[i];
-            double mathWC = pLiq > 0 ? ((pLiq - pOil) / pLiq) * 100.0 : 0;
-
-            // 防护 2：含水率的单日波动包络线（允许微跌，主要防暴涨）
-            double baselineWC = baseWC + 0.02; // 预期每天微涨
-            double minWC = baselineWC - 0.05;
-            double maxWC = baselineWC + 0.15;
-
-            double finalWC = mathWC;
-            if (finalWC > maxWC) {
-                finalWC = maxWC;
-            } else if (finalWC < minWC) {
-                finalWC = minWC;
-            }
-
-            // 绝对物理兜底：含水率不可能超过 99%，给产油量留一丝生机
-            finalWC = Math.min(99.0, Math.max(0.0, finalWC));
-
-            // 根据修正后的合理含水率，反推产油量
-            predOil[i] = pLiq * (1.0 - finalWC / 100.0);
-
-            // 更新明天的基准
-            baseWC = finalWC;
-        }
-
-        // 4. 封装返回格式
         Map<String, Object> data = new HashMap<>();
         data.put("predLiquid", predLiquid);
         data.put("predOil", predOil);
@@ -101,5 +60,128 @@ public class PredictionController {
         result.put("msg", "GM(1,1) 物理约束预测成功");
 
         return result;
+    }
+
+    // ==========================================
+    // 🌟 LSTM 预测接口 (支持参数透传) 🌟
+    // ==========================================
+    @GetMapping("/lstm")
+    public Map<String, Object> predictLSTM(
+            @RequestParam String wellId,
+            @RequestParam int days,
+            @RequestParam(defaultValue = "7") int timeSteps, // 接收前端传来的时间步
+            @RequestParam(defaultValue = "200") int epochs)  // 接收前端传来的训练轮数
+    {
+        QueryWrapper<SysWellProduction> wrapper = new QueryWrapper<>();
+        wrapper.eq("WELL_ID", wellId).orderByAsc("RECORD_DATE");
+        List<SysWellProduction> history = productionMapper.selectList(wrapper);
+
+        int sampleSize = Math.min(history.size(), 30);
+        List<Double> liquidDataList = new ArrayList<>();
+        List<Double> oilDataList = new ArrayList<>();
+
+        int startIndex = history.size() - sampleSize;
+        for (int i = 0; i < sampleSize; i++) {
+            SysWellProduction prod = history.get(startIndex + i);
+            liquidDataList.add(prod.getLiquidVol() == null ? 0.0 : prod.getLiquidVol());
+            oilDataList.add(prod.getOilVol() == null ? 0.0 : prod.getOilVol());
+        }
+
+        // 打包数据发给 Python
+        Map<String, Object> requestBody = new HashMap<>();
+        requestBody.put("well_id", wellId);
+        requestBody.put("liquid_data", liquidDataList);
+        requestBody.put("oil_data", oilDataList);
+        requestBody.put("predict_days", days);
+        requestBody.put("time_steps", timeSteps); // 透传给 Python
+        requestBody.put("epochs", epochs);        // 透传给 Python
+
+        String pythonApiUrl = "http://localhost:5000/api/ml/lstm/predict";
+        Map<String, Object> pythonResponse;
+        try {
+            ResponseEntity<Map> response = restTemplate.postForEntity(pythonApiUrl, requestBody, Map.class);
+            pythonResponse = response.getBody();
+        } catch (Exception e) {
+            Map<String, Object> error = new HashMap<>();
+            error.put("code", 500);
+            error.put("msg", "连接 Python 失败: " + e.getMessage());
+            return error;
+        }
+
+        Map<String, Object> responseData = (Map<String, Object>) pythonResponse.get("data");
+        List<Double> predLiquidList = (List<Double>) responseData.get("predLiquid");
+        List<Double> predOilList = (List<Double>) responseData.get("predOil");
+
+        double[] predLiquid = predLiquidList.stream().mapToDouble(Double::doubleValue).toArray();
+        double[] predOil = predOilList.stream().mapToDouble(Double::doubleValue).toArray();
+
+        double[] liquidDataArr = liquidDataList.stream().mapToDouble(Double::doubleValue).toArray();
+        double[] oilDataArr = oilDataList.stream().mapToDouble(Double::doubleValue).toArray();
+
+        // 🌟 应用修复后的约束器 🌟
+        applyPhysicalConstraints(liquidDataArr, oilDataArr, predLiquid, predOil, sampleSize, days);
+
+        Map<String, Object> data = new HashMap<>();
+        data.put("predLiquid", predLiquid);
+        data.put("predOil", predOil);
+
+        Map<String, Object> result = new HashMap<>();
+        result.put("code", 200);
+        result.put("data", data);
+        result.put("msg", "LSTM 微服务协同预测成功");
+
+        return result;
+    }
+
+    // ==========================================
+    // 🌟 修复后的物理机理约束层 (解决含水率暴涨Bug) 🌟
+    // ==========================================
+    private void applyPhysicalConstraints(double[] histLiquid, double[] histOil, double[] predLiquid, double[] predOil, int sampleSize, int days) {
+        if (sampleSize == 0) return;
+
+        // 动态追溯最后一次的真实有效数据，彻底弃用硬编码兜底
+        double validLastLiq = histLiquid[sampleSize - 1] > 0 ? histLiquid[sampleSize - 1] : 10.0;
+        double validLastOil = histOil[sampleSize - 1] > 0 ? histOil[sampleSize - 1] : 5.0;
+
+        for (int i = sampleSize - 1; i >= 0; i--) {
+            if (histLiquid[i] > 1.0 && histOil[i] > 0.1) {
+                validLastLiq = histLiquid[i];
+                validLastOil = histOil[i];
+                break;
+            }
+        }
+
+        // 获取真实的基准含水率
+        double baseWC = ((validLastLiq - validLastOil) / validLastLiq) * 100.0;
+
+        for (int i = 0; i < days; i++) {
+            double pLiq = predLiquid[i];
+
+            // 防护 1：产液量平滑跌落保护
+            if (pLiq < validLastLiq * 0.5) {
+                pLiq = validLastLiq * Math.exp(-0.002 * (i + 1));
+                predLiquid[i] = pLiq;
+            }
+
+            double pOil = predOil[i];
+            double mathWC = pLiq > 0 ? ((pLiq - pOil) / pLiq) * 100.0 : 0;
+
+            // 防护 2：严格的每日波动范围限制（含水率每天最多涨 0.5%，最多跌 0.5%）
+            double maxWC = baseWC + 0.5;
+            double minWC = baseWC - 0.5;
+
+            double finalWC = mathWC;
+            if (finalWC > maxWC) finalWC = maxWC;
+            else if (finalWC < minWC) finalWC = minWC;
+
+            // 绝对物理兜底
+            finalWC = Math.min(99.0, Math.max(0.0, finalWC));
+
+            // 根据平滑处理后的含水率重新校准产油量
+            predOil[i] = pLiq * (1.0 - finalWC / 100.0);
+
+            // 将今天的含水率作为明天的基准，继续向后推演
+            baseWC = finalWC;
+        }
     }
 }
