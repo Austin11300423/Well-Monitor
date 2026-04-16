@@ -19,18 +19,17 @@
       </div>
       <div class="card card-danger">
         <div class="card-icon"><i class="fa-solid fa-triangle-exclamation"></i></div>
-        <div class="card-info"><p>实时异常未处理</p><h3>{{ unhandledAnomalies }} <span class="unit">条</span></h3></div>
+        <div class="card-info"><p>单井异常未处理</p><h3>{{ unhandledAnomalies }} <span class="unit">条</span></h3></div>
       </div>
       <div class="card card-warning">
-        <div class="card-icon"><i class="fa-solid fa-eye"></i></div>
-        <div class="card-info"><p>预测风险待研判</p><h3>{{ unhandledRisks }} <span class="unit">条</span></h3></div>
+        <div class="card-icon"><i class="fa-solid fa-network-wired"></i></div>
+        <div class="card-info"><p>井组异常未处理</p><h3>{{ unhandledGroups }} <span class="unit">条</span></h3></div>
       </div>
     </div>
 
-    <div class="bottom-layout">
-      <div class="split-row telemetry-row">
-
-        <div class="monitor-section">
+    <div class="bottom-layout-rows">
+      <div class="row-wrapper">
+        <div class="monitor-section" style="flex: 1;">
           <div class="monitor-header">
             <h3><i class="fa-solid fa-satellite-dish" style="color:#e74c3c;"></i> 单井遥测分析</h3>
             <div class="well-selector">
@@ -52,14 +51,14 @@
           </div>
         </div>
 
-        <div class="monitor-section">
+        <div class="monitor-section" style="flex: 1;">
           <div class="monitor-header">
             <h3><i class="fa-solid fa-network-wired" style="color:#3498db;"></i> 井组遥测分析</h3>
             <div class="well-selector">
               <label>监控井组：</label>
               <select v-model="selectedGroupId" @change="switchGroup">
                 <option v-for="group in groupList" :key="group.centerWaterWell" :value="group.centerWaterWell">
-                  {{ group.groupName }}
+                  {{ group.groupName }} ({{ group.centerWaterWell }})
                 </option>
                 <option v-if="groupList.length === 0" value="">暂无井组数据</option>
               </select>
@@ -68,21 +67,17 @@
 
           <div class="group-stats-bar" v-if="currentGroupData">
             <div class="stat-item">
-              <span>注水总量</span>
-              <b>{{ currentGroupData.totalInjectVol || 0 }} <small>m³/d</small></b>
+              <span>注水总量</span><b>{{ currentGroupData.totalInjectVol || 0 }} <small>m³/d</small></b>
             </div>
             <div class="stat-item">
-              <span>产液总量</span>
-              <b>{{ (currentGroupData.totalLiquidVol || 0).toFixed(1) }} <small>t/d</small></b>
+              <span>产液总量</span><b>{{ (currentGroupData.totalLiquidVol || 0).toFixed(1) }} <small>t/d</small></b>
             </div>
             <div class="stat-item highlight">
-              <span>综合注采比</span>
-              <strong>{{ currentGroupData.injectionProductionRatio || '0.00' }}</strong>
+              <span>综合注采比</span><strong>{{ currentGroupData.injectionProductionRatio || '0.00' }}</strong>
             </div>
           </div>
 
           <div class="chart-box line-chart-container" ref="groupChartRef" v-show="groupList.length > 0"></div>
-
           <div class="offline-display-box" v-show="groupList.length === 0">
             <div class="offline-content">
               <i class="fa-solid fa-circle-nodes" style="font-size: 40px; color:#cbd5e1; margin-bottom:10px;"></i>
@@ -90,20 +85,18 @@
             </div>
           </div>
         </div>
-
       </div>
 
-      <div class="split-row warning-row">
-
-        <div class="warning-panel">
+      <div class="row-wrapper">
+        <div class="global-alert-panel" style="flex: 1;">
           <div class="alert-header">
-            <h3><i class="fa-solid fa-triangle-exclamation"></i> 单井预警信息</h3>
+            <h3><i class="fa-solid fa-clipboard-list"></i> 单井专家诊断日志 </h3>
             <span class="alert-count">{{ singleWellAlerts.length }} 条记录</span>
           </div>
           <div class="alert-list">
             <div v-if="singleWellAlerts.length === 0" class="empty-alert">
               <i class="fa-regular fa-circle-check" style="font-size: 30px; color: #27ae60; margin-bottom: 10px;"></i>
-              <p>当前全区单井生产平稳</p>
+              <p>当前单井生产平稳，无异常报警</p>
             </div>
             <div v-for="item in singleWellAlerts" :key="item.id" :class="['alert-item', getAlertCardClass(item.type)]">
               <div class="alert-main">
@@ -124,15 +117,15 @@
           </div>
         </div>
 
-        <div class="warning-panel">
-          <div class="alert-header group-header">
-            <h3><i class="fa-solid fa-network-wired"></i> 井组预警信息</h3>
-            <span class="alert-count group-count">{{ groupWellAlerts.length }} 条记录</span>
+        <div class="global-alert-panel" style="flex: 1;">
+          <div class="alert-header" style="background: #fdf4ff; border-bottom: 1px solid #f3e8ff;">
+            <h3 style="color: #7e22ce;"><i class="fa-solid fa-network-wired"></i> 井组系统预警日志 </h3>
+            <span class="alert-count" style="background: #7e22ce;">{{ groupWellAlerts.length }} 条记录</span>
           </div>
           <div class="alert-list">
             <div v-if="groupWellAlerts.length === 0" class="empty-alert">
               <i class="fa-solid fa-shield-halved" style="font-size: 30px; color: #8e44ad; margin-bottom: 10px;"></i>
-              <p>当前各井组拓扑运行正常</p>
+              <p>当前各井组拓扑连通运行正常</p>
             </div>
             <div v-for="item in groupWellAlerts" :key="item.id" :class="['alert-item', getAlertCardClass(item.type)]">
               <div class="alert-main">
@@ -147,12 +140,11 @@
                 <div class="alert-content" v-html="formatAlertMessage(item.wellId, item.message, item.type)"></div>
               </div>
               <div class="alert-action">
-                <button class="btn-tiny btn-group-tiny" @click="openAlertEdit(item)"><i class="fa-solid fa-pen"></i> 处置</button>
+                <button class="btn-tiny" style="background: #8e44ad;" @click="openAlertEdit(item)"><i class="fa-solid fa-pen"></i> 处置</button>
               </div>
             </div>
           </div>
         </div>
-
       </div>
     </div>
 
@@ -165,7 +157,9 @@
             <div class="form-group">
               <label>处理状态</label>
               <select v-model="alertForm.status">
-                <option value="未处理">未处理</option><option value="处理中">处理中</option><option value="已处理">已处理</option>
+                <option value="未处理">未处理</option>
+                <option value="处理中">处理中</option>
+                <option value="已处理">已处理</option>
               </select>
             </div>
           </div>
@@ -173,7 +167,9 @@
             <div class="form-group">
               <label>异常级别</label>
               <select v-model="alertForm.warningLevel">
-                <option value="一般">一般</option><option value="严重">严重</option><option value="紧急">紧急</option>
+                <option value="一般">一般</option>
+                <option value="严重">严重</option>
+                <option value="紧急">紧急</option>
               </select>
             </div>
           </div>
@@ -204,14 +200,15 @@ const oilWells = ref(0)
 const waterWells = ref(0)
 
 const unhandledAnomalies = ref(0)
-const unhandledRisks = ref(0)
+const unhandledGroups = ref(0) // 🌟 变更为井组异常统计
 
 const lineChartRef = ref(null)
 const groupChartRef = ref(null)
 const toastList = ref([])
 
 const globalAlerts = ref([])
-const singleWellAlerts = computed(() => globalAlerts.value.filter(alert => alert.type === 0 || alert.type === 1))
+// 🌟 清理了无用的 type 1，只保留 0(单井) 和 2(井组) 🌟
+const singleWellAlerts = computed(() => globalAlerts.value.filter(alert => alert.type === 0))
 const groupWellAlerts = computed(() => globalAlerts.value.filter(alert => alert.type === 2))
 
 let lineChart = null
@@ -230,15 +227,20 @@ const alertForm = ref({
   id: null, wellId: '', warningLevel: '一般', status: '未处理', warningContent: ''
 })
 
-const getAlertCardClass = (type) => type === 1 ? 'alert-type-risk' : (type === 2 ? 'alert-type-group' : 'alert-type-anomaly')
-const getTypeTagClass = (type) => type === 1 ? 'type-tag tag-risk' : (type === 2 ? 'type-tag tag-group' : 'type-tag tag-anomaly')
-const getTypeName = (type) => type === 1 ? '预测风险' : (type === 2 ? '井组预警' : '实时异常')
-const getTypeIcon = (type) => type === 1 ? 'fa-solid fa-eye' : (type === 2 ? 'fa-solid fa-network-wired' : 'fa-solid fa-triangle-exclamation')
+// 🌟 清理样式映射函数，移除对 type 1 的判断 🌟
+const getAlertCardClass = (type) => type === 2 ? 'alert-type-group' : 'alert-type-anomaly'
+const getTypeTagClass = (type) => type === 2 ? 'type-tag tag-group' : 'type-tag tag-anomaly'
+const getTypeName = (type) => type === 2 ? '井组系统预警' : '单井专家诊断'
+const getTypeIcon = (type) => type === 2 ? 'fa-solid fa-network-wired' : 'fa-solid fa-triangle-exclamation'
 const formatAlertMessage = (wellId, msg, type) => {
-  let color = type === 1 ? '#e67e22' : (type === 2 ? '#9b59b6' : '#e53e3e')
+  let color = type === 2 ? '#9b59b6' : '#e53e3e'
   return `<strong style="color: ${color};">[${wellId}]</strong> ${msg}`
 }
-const getStatusClass = (status) => status === '已处理' ? 'status-tag bg-success' : (status === '处理中' ? 'status-tag bg-warning' : 'status-tag bg-danger')
+const getStatusClass = (status) => {
+  if (status === '已处理') return 'status-tag bg-success'
+  if (status === '处理中') return 'status-tag bg-warning'
+  return 'status-tag bg-danger'
+}
 
 const openAlertEdit = (item) => {
   alertForm.value = { id: item.id, wellId: item.wellId, warningLevel: item.level || '一般', status: item.status || '未处理', warningContent: item.message }
@@ -257,8 +259,10 @@ const fetchRealAlerts = async () => {
   try {
     const res = await request.get('/api/warning/list')
     const rawList = res.data || []
+
+    // 🌟 更新顶部卡片的数据源 🌟
     unhandledAnomalies.value = rawList.filter(l => l.warningType === 0 && l.status === '未处理').length
-    unhandledRisks.value = rawList.filter(l => l.warningType === 1 && l.status === '未处理').length
+    unhandledGroups.value = rawList.filter(l => l.warningType === 2 && l.status === '未处理').length
 
     globalAlerts.value = rawList.slice(0, 80).map(log => {
       const d = new Date(log.createTime)
@@ -279,7 +283,7 @@ const fetchGroupData = async () => {
       switchGroup()
     } else if (selectedGroupId.value) {
       currentGroupData.value = groupList.value.find(g => g.centerWaterWell === selectedGroupId.value)
-      if (groupChart) renderGroupTopology() // 数据刷新后重绘图表，保持注采比同步
+      if (groupChart) renderGroupTopology() // 保持图表与数据同步刷新
     }
   } catch (error) { console.error("获取井组数据失败:", error) }
 }
@@ -334,6 +338,9 @@ const switchGroup = () => {
   }
 }
 
+// =====================================
+// 单井折线图逻辑
+// =====================================
 const initLineChart = () => {
   if (!lineChartRef.value) return
   lineChart = echarts.init(lineChartRef.value)
@@ -353,7 +360,7 @@ const updateChartOption = () => {
   lineChart.setOption({
     tooltip: { trigger: 'axis' },
     legend: { top: 0 },
-    grid: { left: '8%', right: '8%', bottom: '5%', top: '40px', containLabel: true },
+    grid: { left: '8%', right: '8%', bottom: '5%', containLabel: true },
     xAxis: { type: 'category', boundaryGap: false, data: data.time },
     yAxis: [
       { type: 'value', name: '压力(MPa)', position: 'left', min: 0, max: 25, splitLine: { lineStyle: { type: 'dashed' } } },
@@ -370,7 +377,9 @@ const updateChartOption = () => {
   })
 }
 
-// === 🌟 深度重构的井组拓扑图 (显式修复了流动光标动画) 🌟 ===
+// =====================================
+// 井组拓扑图逻辑 (流动虚线 + Tooltip)
+// =====================================
 const initGroupChart = () => {
   if (!groupChartRef.value) return
   groupChart = echarts.init(groupChartRef.value)
@@ -386,7 +395,7 @@ const renderGroupTopology = () => {
   const scatterData = []
   const linesData = []
 
-  // 中心水井节点 (蓝色)
+  // 中心水井
   scatterData.push({
     name: group.centerWaterWell,
     value: centerCoord,
@@ -406,7 +415,6 @@ const renderGroupTopology = () => {
       const y = 50 + radius * Math.sin(angle)
       const targetCoord = [x, y]
 
-      // 周围油井节点 (橙色)
       scatterData.push({
         name: oilWellId,
         value: targetCoord,
@@ -415,7 +423,7 @@ const renderGroupTopology = () => {
         label: { show: true, position: 'bottom', formatter: '{b}\n(油井)', color: '#555' }
       })
 
-      // 提取连线坐标对 (给 lines series 使用)
+      // 虚线连线坐标
       linesData.push({
         coords: [centerCoord, targetCoord]
       })
@@ -450,7 +458,6 @@ const renderGroupTopology = () => {
         return html;
       }
     },
-    // 强制声明使用直角坐标系，这是让虚线和箭头能够正确飞行的核心条件
     xAxis: { show: false, min: 0, max: 100 },
     yAxis: { show: false, min: 0, max: 100 },
     series: [
@@ -464,23 +471,21 @@ const renderGroupTopology = () => {
         type: 'lines',
         coordinateSystem: 'cartesian2d',
         data: linesData,
-        // 🌟 动画特效层 (独立分配 zlevel: 2 确保箭头漂浮在最上层) 🌟
         zlevel: 2,
         effect: {
           show: true,
-          period: 3,          // 箭头移动周期(秒)，越小越快
-          trailLength: 0.3,   // 尾迹长度
-          color: '#00d2d3',   // 蓝绿色发光箭头
-          symbolSize: 10,     // 箭头尺寸放大，让你看得更清楚
+          period: 4,
+          trailLength: 0.2,
+          color: '#00d2d3',
+          symbolSize: 8,
           symbol: 'arrow'
         },
-        // 底层静态虚线样式
         lineStyle: {
           color: '#3498db',
           width: 2,
           type: 'dashed',
-          curveness: 0.15,    // 加一点点弧度会更好看
-          opacity: 0.6
+          curveness: 0.15,
+          opacity: 0.5
         }
       }
     ]
@@ -527,93 +532,90 @@ onUnmounted(() => {
 .card-total { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); }
 .card-oil { background: linear-gradient(135deg, #2af598 0%, #009efd 100%); }
 .card-danger { background: linear-gradient(135deg, #ff0844 0%, #ffb199 100%); }
-.card-warning { background: linear-gradient(135deg, #ff9a44 0%, #fc6076 100%); }
+/* 🌟 微调了卡片渐变色，使其稍微偏向紫橙色以匹配井组主题 */
+.card-warning { background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%); }
 
-/* 🌟 分层布局 🌟 */
-.bottom-layout { display: flex; flex-direction: column; gap: 20px; }
-.split-row { display: flex; gap: 20px; width: 100%; }
+.bottom-layout-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+.row-wrapper {
+  display: flex;
+  gap: 20px;
+  height: 420px;
+}
 
-.telemetry-row { height: 420px; }
-.warning-row { height: 380px; }
-
-.monitor-section, .warning-panel {
-  flex: 1;
+.global-alert-panel {
   background: white;
   border-radius: 10px;
   border: 1px solid #e2e8f0;
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  box-shadow: 0 4px 12px rgba(0,0,0,0.02);
 }
+.alert-header { background: #fff5f5; padding: 15px 20px; border-bottom: 1px solid #fed7d7; display: flex; justify-content: space-between; align-items: center;}
+.alert-header h3 { margin: 0; font-size: 16px; color: #c53030; }
+.alert-count { font-size: 12px; background: #c53030; color: white; padding: 2px 8px; border-radius: 10px;}
+.alert-list { flex: 1; overflow-y: auto; padding: 10px; background: #fafafa; }
+.alert-list::-webkit-scrollbar { width: 6px; }
+.alert-list::-webkit-scrollbar-thumb { background-color: #cbd5e1; border-radius: 10px; }
+.empty-alert { display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; color: #7f8c8d; font-size: 14px;}
+.alert-item { position: relative; display: flex; justify-content: space-between; align-items: center; background: white; padding: 12px 15px; margin-bottom: 10px; border-radius: 4px; box-shadow: 0 2px 5px rgba(0,0,0,0.05); animation: fadeIn 0.5s; transition: 0.2s;}
+.alert-item:hover { transform: translateX(2px); box-shadow: 0 4px 8px rgba(0,0,0,0.1); }
+.alert-type-anomaly { border-left: 4px solid #e53e3e; }
+.alert-type-risk { border-left: 4px solid #e67e22; background: #fffaf0;}
+.alert-type-group { border-left: 4px solid #9b59b6; background: #fdf4ff;}
+.alert-main { flex: 1; min-width: 0; }
+.alert-meta { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; flex-wrap: wrap;}
+.alert-time { font-size: 12px; color: #a0aec0; }
+.alert-content { font-size: 13px; color: #2d3748; line-height: 1.4; word-break: break-all;}
+.status-tag, .level-tag { padding: 2px 6px; border-radius: 4px; font-size: 11px; font-weight: bold; color: white; }
+.bg-success { background-color: #27ae60; }
+.bg-warning { background-color: #f39c12; color: #fff; }
+.bg-danger { background-color: #e74c3c; }
+.level-tag { background-color: #95a5a6; }
+.type-tag { padding: 2px 6px; border-radius: 4px; font-size: 11px; font-weight: bold; color: white; margin-left: auto; }
+.tag-anomaly { background-color: #e53e3e; }
+.tag-risk { background-color: #e67e22; }
+.tag-group { background-color: #9b59b6; }
+.alert-action { opacity: 0; transition: opacity 0.2s; padding-left: 10px; }
+.alert-item:hover .alert-action { opacity: 1; }
+.btn-tiny { background: #3498db; color: white; border: none; padding: 5px 10px; font-size: 12px; border-radius: 4px; cursor: pointer; display: flex; align-items: center; gap: 4px; transition: 0.2s; }
+.btn-tiny:hover { background: #2980b9; transform: scale(1.05); }
 
-/* --- 图表与内容细节 --- */
-.monitor-header { display: flex; justify-content: space-between; align-items: center; padding: 15px 20px; border-bottom: 2px dashed #cbd5e1;}
+.monitor-section {
+  background: white;
+  border-radius: 10px;
+  padding: 20px;
+  border: 1px solid #e2e8f0;
+  display: flex;
+  flex-direction: column;
+}
+.monitor-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px; padding-bottom: 10px; border-bottom: 2px dashed #cbd5e1;}
 .monitor-header h3 { margin: 0; font-size: 16px; color: var(--primary-color);}
 .well-selector { display: flex; align-items: center; font-size: 13px; font-weight: bold;}
 .well-selector select { margin-left: 10px; padding: 6px 10px; border: 1px solid #bdc3c7; border-radius: 6px; outline: none; font-size: 13px; cursor: pointer;}
 .line-chart-container { flex: 1; width: 100%; }
 
-.group-stats-bar { display: flex; justify-content: space-around; align-items: center; background: #f8fafc; padding: 10px 15px; border-bottom: 1px solid #e2e8f0; }
-.stat-item { display: flex; flex-direction: column; align-items: center; }
-.stat-item span { font-size: 11px; color: #64748b; margin-bottom: 4px; font-weight: bold;}
-.stat-item b { font-size: 15px; color: #2c3e50; }
-.stat-item small { font-size: 11px; color: #94a3b8; font-weight: normal; }
-.stat-item.highlight span { color: #e67e22; }
-.stat-item.highlight strong { font-size: 18px; color: #d35400; font-weight: 900; }
-
-.offline-display-box { flex: 1; display: flex; align-items: center; justify-content: center; background: #fafafa; }
+.offline-display-box { flex: 1; display: flex; align-items: center; justify-content: center; background: #fafafa; border-radius: 8px; border: 1px dashed #cbd5e1; }
 .offline-content { text-align: center; color: #94a3b8; }
 .icon-pulse-wrapper { display: inline-flex; align-items: center; justify-content: center; width: 60px; height: 60px; border-radius: 50%; background: #fee2e2; color: #ef4444; font-size: 24px; margin-bottom: 15px; animation: gentle-pulse 2s infinite; }
 @keyframes gentle-pulse { 0% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.4); } 70% { box-shadow: 0 0 0 15px rgba(239, 68, 68, 0); } 100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0); } }
 .offline-content h4 { margin: 0 0 8px 0; color: #ef4444; font-size: 18px; }
 .offline-content p { margin: 0; font-size: 13px; }
 
-.alert-header { background: #fff5f5; padding: 15px 20px; border-bottom: 1px solid #fed7d7; display: flex; justify-content: space-between; align-items: center;}
-.alert-header h3 { margin: 0; font-size: 15px; color: #c53030; }
-.alert-count { font-size: 12px; background: #c53030; color: white; padding: 2px 8px; border-radius: 10px;}
-
-.group-header { background: #fdf4ff; border-bottom: 1px solid #f3e8ff;}
-.group-header h3 { color: #7e22ce; }
-.group-count { background: #7e22ce; }
-
-.alert-list { flex: 1; overflow-y: auto; padding: 15px; background: #fafafa; }
-.alert-list::-webkit-scrollbar { width: 6px; }
-.alert-list::-webkit-scrollbar-thumb { background-color: #cbd5e1; border-radius: 10px; }
-.empty-alert { display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; color: #7f8c8d; font-size: 14px;}
-
-.alert-item { position: relative; display: flex; justify-content: space-between; align-items: center; background: white; padding: 14px 16px; margin-bottom: 12px; border-radius: 6px; box-shadow: 0 2px 5px rgba(0,0,0,0.04); animation: fadeIn 0.5s; transition: 0.2s;}
-.alert-item:hover { transform: translateX(2px); box-shadow: 0 4px 8px rgba(0,0,0,0.08); }
-
-.alert-type-anomaly { border-left: 4px solid #e53e3e; }
-.alert-type-risk { border-left: 4px solid #e67e22; background: #fffaf0;}
-.alert-type-group { border-left: 4px solid #9b59b6; background: #fdf4ff;}
-
-.alert-main { flex: 1; min-width: 0; }
-.alert-meta { display: flex; align-items: center; gap: 10px; margin-bottom: 6px; flex-wrap: wrap;}
-.alert-time { font-size: 12px; color: #a0aec0; }
-.alert-content { font-size: 13px; color: #2d3748; line-height: 1.5; word-break: break-all;}
-
-.status-tag, .level-tag { padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: bold; color: white; }
-.bg-success { background-color: #27ae60; }
-.bg-warning { background-color: #f39c12; color: #fff; }
-.bg-danger { background-color: #e74c3c; }
-.level-tag { background-color: #95a5a6; }
-
-.type-tag { padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: bold; color: white; margin-left: auto; }
-.tag-anomaly { background-color: #e53e3e; }
-.tag-risk { background-color: #e67e22; }
-.tag-group { background-color: #9b59b6; }
-
-.alert-action { opacity: 0; transition: opacity 0.2s; padding-left: 15px; }
-.alert-item:hover .alert-action { opacity: 1; }
-.btn-tiny { background: #3498db; color: white; border: none; padding: 6px 10px; font-size: 12px; border-radius: 4px; cursor: pointer; display: flex; align-items: center; gap: 6px; transition: 0.2s; }
-.btn-tiny:hover { background: #2980b9; transform: scale(1.05); }
-.btn-group-tiny { background: #8e44ad; }
-.btn-group-tiny:hover { background: #732d91; }
+.group-stats-bar { display: flex; justify-content: space-around; align-items: center; background: #f8fafc; padding: 8px 15px; border-bottom: 1px solid #e2e8f0; margin-bottom: 10px; border-radius: 6px;}
+.stat-item { display: flex; flex-direction: column; align-items: center; }
+.stat-item span { font-size: 11px; color: #64748b; margin-bottom: 4px; font-weight: bold;}
+.stat-item b { font-size: 14px; color: #2c3e50; }
+.stat-item small { font-size: 11px; color: #94a3b8; font-weight: normal; }
+.stat-item.highlight span { color: #e67e22; }
+.stat-item.highlight strong { font-size: 16px; color: #d35400; font-weight: 900; }
 
 @keyframes fadeIn { from { opacity: 0; transform: translateY(-10px); } to { opacity: 1; transform: translateY(0); } }
 
+/* --- 弹窗样式 --- */
 .modal-overlay { position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: rgba(0,0,0,0.5); display: flex; align-items: center; justify-content: center; z-index: 10000; }
 .modal-content { background: white; padding: 30px; border-radius: 12px; box-shadow: 0 10px 25px rgba(0,0,0,0.2); }
 .modal-content h3 { margin-top: 0; color: #2c3e50; border-bottom: 2px solid #3498db; padding-bottom: 10px; margin-bottom: 20px;}

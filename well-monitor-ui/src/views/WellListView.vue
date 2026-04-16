@@ -1,117 +1,127 @@
 <template>
   <div class="panel">
-    <div class="header-actions">
-      <h2 class="panel-title"><i class="fa-solid fa-list-ul"></i> 油水井台账与动态管理</h2>
-      <div class="action-buttons">
-        <button class="btn btn-secondary" @click="downloadTemplate"><i class="fa-solid fa-download"></i> 下载模板</button>
-        <button class="btn btn-secondary" @click="triggerUpload"><i class="fa-solid fa-upload"></i> 导入Excel</button>
-        <input type="file" ref="fileInput" @change="handleFileUpload" style="display: none" accept=".xlsx, .xls">
-        <button class="btn btn-primary" @click="openAddDialog"><i class="fa-solid fa-plus"></i> 新增井位</button>
+
+    <div class="tab-header">
+      <div :class="['tab-title', { active: activeTab === 'ledger' }]" @click="switchTab('ledger')">
+        <i class="fa-solid fa-list-ul"></i> 油水井台账与动态管理
+      </div>
+      <div :class="['tab-title', { active: activeTab === 'topology' }]" @click="switchTab('topology')">
+        <i class="fa-solid fa-network-wired"></i> 井组连通关系与注水拓扑感知
       </div>
     </div>
 
-    <table class="data-table">
-      <thead>
-      <tr>
-        <th>井号</th><th>井别</th><th>状态</th><th>经度</th><th>纬度</th><th>今日实时均值 (传感器)</th><th>操作</th>
-      </tr>
-      </thead>
-      <tbody>
-      <tr v-for="item in wellDataList" :key="item.info.wellId">
-        <td><strong>{{ item.info.wellId }}</strong></td>
-        <td><span :class="item.info.wellType === '油井' ? 'tag tag-oil' : 'tag tag-water'">{{ item.info.wellType }}</span></td>
-        <td><span :class="item.info.status === '正常' ? 'text-success' : 'text-danger'">{{ item.info.status }}</span></td>
-        <td>{{ item.info.longitude }}</td>
-        <td>{{ item.info.latitude }}</td>
-        <td>
-          <div v-if="item.info.status === '正常'">
-            <div v-if="globalRealtimeData[item.info.wellId]?.isOnline" class="prod-info-mini">
-              <div class="realtime-tag"><i class="fa-solid fa-circle-dot pulse"></i> 实时同步中</div>
-              <template v-if="item.info.wellType === '油井'">
-                产液: <b>{{ globalRealtimeData[item.info.wellId].liquid }}</b> /
-                产油: <b>{{ (parseFloat(globalRealtimeData[item.info.wellId].liquid) * (1 - parseFloat(globalRealtimeData[item.info.wellId].waterCut) / 100)).toFixed(1) }}</b> /
-                含水率: <b>{{ globalRealtimeData[item.info.wellId].waterCut }}%</b> <br/>
-                压力: <b>{{ globalRealtimeData[item.info.wellId].pressure }} MPa</b>
-              </template>
-              <template v-else>
-                注水: <b>{{ globalRealtimeData[item.info.wellId].injectRate }}</b> /
-                压力: <b>{{ globalRealtimeData[item.info.wellId].injectPress }} MPa</b>
-              </template>
-            </div>
-            <div v-else class="text-muted" style="font-size: 12px;">
-              <i class="fa-solid fa-spinner fa-spin"></i> 等待信号接入...
-            </div>
-          </div>
-          <div v-else class="text-danger" style="font-size: 12px; font-weight: bold;">
-            <i class="fa-solid fa-power-off"></i> 设备已停机，数据采集关闭
-          </div>
-        </td>
-        <td>
-          <button class="btn btn-sm btn-edit" @click="openEditDialog(item)"><i class="fa-solid fa-pen"></i> 编辑台账</button>
-          <button class="btn btn-sm btn-delete" @click="deleteWell(item.info.wellId)"><i class="fa-solid fa-trash"></i> 删除</button>
-        </td>
-      </tr>
-      </tbody>
-    </table>
-
-    <div class="divider">
-      <div class="divider-line"></div>
-      <div class="divider-text"><i class="fa-solid fa-link"></i> 井组连通关系与注水拓扑感知 <i class="fa-solid fa-link"></i></div>
-      <div class="divider-line"></div>
-    </div>
-
-    <div class="group-section">
-      <div class="group-sidebar">
-        <div class="sidebar-header" style="display: flex; justify-content: space-between; align-items: center;">
-          <h3 style="margin: 0;"><i class="fa-solid fa-network-wired"></i> 全区井组列表</h3>
-          <button class="btn-tiny" @click="openGroupDialog"><i class="fa-solid fa-pen-to-square"></i> 编辑井组</button>
-        </div>
-        <div class="group-list">
-          <div v-for="group in groupList" :key="group.centerWaterWell"
-               :class="['group-item', { active: selectedGroupId === group.centerWaterWell }]"
-               @click="selectGroup(group)">
-            <div class="group-icon"><i class="fa-solid fa-layer-group"></i></div>
-            <div class="group-info">
-              <h4>{{ group.groupName }}</h4>
-              <p>中心井: {{ group.centerWaterWell }} | 关联: {{ group.connectedOilWells ? group.connectedOilWells.length : 0 }} 口</p>
-            </div>
-            <i class="fa-solid fa-chevron-right arrow-icon"></i>
-          </div>
-          <div v-if="groupList.length === 0" class="empty-group">
-            <p>暂无井组连通关系，请点击上方按钮创建</p>
-          </div>
+    <div v-show="activeTab === 'ledger'">
+      <div class="header-actions">
+        <div style="flex: 1;"></div>
+        <div class="action-buttons">
+          <button class="btn btn-secondary" @click="downloadTemplate"><i class="fa-solid fa-download"></i> 下载模板</button>
+          <button class="btn btn-secondary" @click="triggerUpload"><i class="fa-solid fa-upload"></i> 导入Excel</button>
+          <input type="file" ref="fileInput" @change="handleFileUpload" style="display: none" accept=".xlsx, .xls">
+          <button class="btn btn-primary" @click="openAddDialog"><i class="fa-solid fa-plus"></i> 新增井位</button>
         </div>
       </div>
 
-      <div class="group-display">
-        <div class="empty-display" v-if="!currentGroup">
-          <div class="empty-icon"><i class="fa-solid fa-satellite-dish"></i></div>
-          <h4>暂未选择展示井组</h4>
-          <p>请在左侧列表点击选中井组，或点击"编辑井组"新建拓扑关系</p>
+      <table class="data-table">
+        <thead>
+        <tr>
+          <th>井号</th><th>井别</th><th>状态</th><th>经度</th><th>纬度</th><th>今日实时均值 (传感器)</th><th>操作</th>
+        </tr>
+        </thead>
+        <tbody>
+        <tr v-for="item in wellDataList" :key="item.info.wellId">
+          <td><strong>{{ item.info.wellId }}</strong></td>
+          <td><span :class="item.info.wellType === '油井' ? 'tag tag-oil' : 'tag tag-water'">{{ item.info.wellType }}</span></td>
+          <td><span :class="item.info.status === '正常' ? 'text-success' : 'text-danger'">{{ item.info.status }}</span></td>
+          <td>{{ item.info.longitude }}</td>
+          <td>{{ item.info.latitude }}</td>
+          <td>
+            <div v-if="item.info.status === '正常'">
+              <div v-if="globalRealtimeData[item.info.wellId]?.isOnline" class="prod-info-mini">
+                <div class="realtime-tag"><i class="fa-solid fa-circle-dot pulse"></i> 实时同步中</div>
+                <template v-if="item.info.wellType === '油井'">
+                  产液: <b>{{ globalRealtimeData[item.info.wellId].liquid }}</b> /
+                  产油: <b>{{ (parseFloat(globalRealtimeData[item.info.wellId].liquid) * (1 - parseFloat(globalRealtimeData[item.info.wellId].waterCut) / 100)).toFixed(1) }}</b> /
+                  含水率: <b>{{ globalRealtimeData[item.info.wellId].waterCut }}%</b> <br/>
+                  压力: <b>{{ globalRealtimeData[item.info.wellId].pressure }} MPa</b>
+                </template>
+                <template v-else>
+                  注水: <b>{{ globalRealtimeData[item.info.wellId].injectRate }}</b> /
+                  压力: <b>{{ globalRealtimeData[item.info.wellId].injectPress }} MPa</b>
+                </template>
+              </div>
+              <div v-else class="text-muted" style="font-size: 12px;">
+                <i class="fa-solid fa-spinner fa-spin"></i> 等待信号接入...
+              </div>
+            </div>
+            <div v-else class="text-danger" style="font-size: 12px; font-weight: bold;">
+              <i class="fa-solid fa-power-off"></i> 设备已停机，数据采集关闭
+            </div>
+          </td>
+          <td>
+            <button class="btn btn-sm btn-edit" @click="openEditDialog(item)"><i class="fa-solid fa-pen"></i> 编辑台账</button>
+            <button class="btn btn-sm btn-delete" @click="deleteWell(item.info.wellId)"><i class="fa-solid fa-trash"></i> 删除</button>
+          </td>
+        </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div v-show="activeTab === 'topology'">
+      <div class="group-section">
+
+        <div class="group-sidebar">
+          <div class="sidebar-header" style="display: flex; justify-content: space-between; align-items: center;">
+            <h3 style="margin: 0;"><i class="fa-solid fa-network-wired"></i> 全区井组列表</h3>
+            <button class="btn-tiny" @click="openGroupDialog"><i class="fa-solid fa-pen-to-square"></i> 编辑井组</button>
+          </div>
+          <div class="group-list">
+            <div v-for="group in groupList" :key="group.centerWaterWell"
+                 :class="['group-item', { active: selectedGroupId === group.centerWaterWell }]"
+                 @click="selectGroup(group)">
+              <div class="group-icon"><i class="fa-solid fa-layer-group"></i></div>
+              <div class="group-info">
+                <h4>{{ group.groupName }}</h4>
+                <p>中心井: {{ group.centerWaterWell }} | 关联: {{ group.connectedOilWells ? group.connectedOilWells.length : 0 }} 口</p>
+              </div>
+              <i class="fa-solid fa-chevron-right arrow-icon"></i>
+            </div>
+            <div v-if="groupList.length === 0" class="empty-group">
+              <p>暂无井组连通关系，请点击上方按钮创建</p>
+            </div>
+          </div>
         </div>
 
-        <div class="display-header" v-if="currentGroup">
-          <div class="header-title">
-            <h3>{{ currentGroup.groupName }} <span class="badge">动态拓扑图</span></h3>
-            <p class="sub-desc">地下水驱动力流向与物理连通关系映射</p>
+        <div class="group-display">
+          <div class="empty-display" v-if="!currentGroup">
+            <div class="empty-icon"><i class="fa-solid fa-satellite-dish"></i></div>
+            <h4>暂未选择展示井组</h4>
+            <p>请在左侧列表点击选中井组，或点击"编辑井组"新建拓扑关系</p>
           </div>
-          <div class="header-stats">
-            <div class="stat-box">
-              <label>注水总量 (m³/d)</label>
-              <span>{{ currentGroup.totalInjectVol }}</span>
-            </div>
-            <div class="stat-box">
-              <label>产液总量 (t/d)</label>
-              <span>{{ currentGroup.totalLiquidVol.toFixed(1) }}</span>
-            </div>
-            <div class="stat-box highlight-box">
-              <label>综合注采比</label>
-              <strong>{{ currentGroup.injectionProductionRatio }}</strong>
-            </div>
-          </div>
-        </div>
 
-        <div class="topology-chart" ref="topologyChartRef" v-show="currentGroup"></div>
+          <template v-else>
+            <div class="display-header-static">
+              <div class="header-title">
+                <h3>{{ currentGroup.groupName }} <span class="badge">动态拓扑图</span></h3>
+              </div>
+              <div class="header-stats">
+                <div class="stat-box">
+                  <label>注水总量</label>
+                  <span>{{ currentGroup.totalInjectVol }} <small>m³/d</small></span>
+                </div>
+                <div class="stat-box">
+                  <label>产液总量</label>
+                  <span>{{ currentGroup.totalLiquidVol.toFixed(1) }} <small>t/d</small></span>
+                </div>
+                <div class="stat-box highlight-box">
+                  <label>综合注采比</label>
+                  <strong>{{ currentGroup.injectionProductionRatio }}</strong>
+                </div>
+              </div>
+            </div>
+
+            <div class="topology-chart" ref="topologyChartRef"></div>
+          </template>
+        </div>
       </div>
     </div>
 
@@ -216,6 +226,8 @@ import * as echarts from 'echarts'
 
 import { globalRealtimeData, startGlobalEngine } from '../utils/realtimeStore'
 
+const activeTab = ref('ledger')
+
 const wellDataList = ref([])
 const relationList = ref([])
 const showDialog = ref(false)
@@ -243,6 +255,22 @@ const waterWells = computed(() => wellDataList.value.map(w => w.info).filter(w =
 const oilWells = computed(() => wellDataList.value.map(w => w.info).filter(w => w.wellType === '油井'))
 
 const handleWellTypeChange = () => { }
+
+// 🌟 修复 Echarts 挤成一团的核心逻辑 🌟
+const switchTab = (tab) => {
+  activeTab.value = tab;
+  if (tab === 'topology') {
+    nextTick(() => {
+      // 切换过去时，强制重新渲染图表并自适应宽度
+      if (currentGroup.value) {
+        renderTopologyAnimation(currentGroup.value);
+      }
+      if (topologyChart) {
+        topologyChart.resize();
+      }
+    });
+  }
+}
 
 const fetchData = async () => {
   try {
@@ -308,12 +336,10 @@ const handleFileUpload = async (event) => {
   } catch (error) { alert('导入失败') } finally { event.target.value = '' }
 }
 
-// 🌟🌟 核心修复区 1：多层防弹脱壳解析数据 🌟🌟
 const fetchGroups = async () => {
   try {
     const res = await request.get('/api/group/analysis')
 
-    // 强制扒开 Axios 可能包在外面的各种拦截器外衣，直到拿到真实的 List 数组
     let dataList = []
     if (res.code === 200) {
       dataList = res.data
@@ -350,7 +376,10 @@ const selectGroup = async (group) => {
   selectedGroupId.value = group.centerWaterWell
   currentGroup.value = group
   await nextTick()
-  renderTopologyAnimation(group)
+  // 只有当前处于井组 tab 时才立刻渲染，防止高度计算为 0
+  if (activeTab.value === 'topology') {
+    renderTopologyAnimation(group)
+  }
 }
 
 const openGroupDialog = () => {
@@ -390,9 +419,12 @@ const saveGroupData = async () => {
   }
 }
 
-// 🌟🌟 核心修复区 2：兜底孤岛水井，防止除以零卡死渲染 🌟🌟
+// 🌟 修复后的 Echarts 拓扑图逻辑 (加入箭头流动特效) 🌟
 const renderTopologyAnimation = (group) => {
   if (!topologyChartRef.value) return
+  // 如果容器宽度为0（因为v-show隐藏），直接跳过，等切回来再画
+  if (topologyChartRef.value.clientWidth === 0) return;
+
   if (!topologyChart) {
     topologyChart = echarts.init(topologyChartRef.value)
   }
@@ -403,17 +435,15 @@ const renderTopologyAnimation = (group) => {
   const scatterData = []
   const linesData = []
 
-  // 1. 无论如何，先把中心水井画出来
+  // 中心水井
   scatterData.push({
     name: group.centerWaterWell,
     value: centerCoord,
-    symbolSize: 70,
+    symbolSize: 80,
     itemStyle: { color: '#3498db', shadowBlur: 20, shadowColor: 'rgba(52, 152, 219, 0.6)' },
-    label: { show: true, position: 'bottom', formatter: '{b}\n(中心水井)', color: '#2c3e50', fontWeight: 'bold' },
-    z: 10
+    label: { show: true, position: 'bottom', formatter: '{b}\n(水井)', color: '#2c3e50', fontWeight: 'bold' }
   })
 
-  // 2. 只有当确实关联了油井时，才去执行三角函数计算，否则跳过
   const oilCount = group.connectedOilWells ? group.connectedOilWells.length : 0
   if (oilCount > 0) {
     const angleStep = (2 * Math.PI) / oilCount
@@ -424,18 +454,18 @@ const renderTopologyAnimation = (group) => {
       const y = 50 + radius * Math.sin(angle)
       const targetCoord = [x, y]
 
+      // 周边油井
       scatterData.push({
         name: oilWellId,
         value: targetCoord,
-        symbolSize: 50,
+        symbolSize: 60,
         itemStyle: { color: '#e67e22', shadowBlur: 10, shadowColor: 'rgba(230, 126, 34, 0.4)' },
-        label: { show: true, position: 'bottom', formatter: '{b}\n(采油井)', color: '#555' },
-        z: 10
+        label: { show: true, position: 'bottom', formatter: '{b}\n(油井)', color: '#555' }
       })
 
+      // 连通线数据
       linesData.push({
-        coords: [centerCoord, targetCoord],
-        lineStyle: { color: '#3498db', width: 2, curveness: 0.1, opacity: 0.4 }
+        coords: [centerCoord, targetCoord]
       })
     })
   }
@@ -443,15 +473,36 @@ const renderTopologyAnimation = (group) => {
   const option = {
     backgroundColor: 'transparent',
     tooltip: { formatter: '{b}' },
-    xAxis: { show: false, min: 0, max: 100 },
-    yAxis: { show: false, min: 0, max: 100 },
+    // 强制声明直角坐标系，支持箭头动效
+    xAxis: { show: false, min: 0, max: 100, type: 'value' },
+    yAxis: { show: false, min: 0, max: 100, type: 'value' },
     series: [
-      { type: 'scatter', symbol: 'circle', data: scatterData, animationDurationUpdate: 1000 },
       {
-        type: 'lines', data: linesData,
-        effect: { show: true, period: 3, trailLength: 0.4, color: '#00d2d3', symbolSize: 6, symbol: 'arrow' },
-        lineStyle: { color: '#bdc3c7', width: 2, type: 'dashed', curveness: 0.2 },
-        z: 1
+        type: 'scatter',
+        coordinateSystem: 'cartesian2d',
+        data: scatterData,
+        zlevel: 1
+      },
+      {
+        type: 'lines',
+        coordinateSystem: 'cartesian2d',
+        data: linesData,
+        zlevel: 2, // 让箭头漂浮在上方
+        effect: {
+          show: true,
+          period: 4,
+          trailLength: 0.2,
+          color: '#00d2d3',
+          symbolSize: 8,
+          symbol: 'arrow'
+        },
+        lineStyle: {
+          color: '#3498db',
+          width: 2,
+          type: 'dashed',
+          curveness: 0.15,
+          opacity: 0.6
+        }
       }
     ]
   }
@@ -467,7 +518,36 @@ onMounted(() => {
 
 <style scoped>
 /* ========================================== */
-/* 🟢 绝对原汁原味保留：你原本的所有 CSS 样式 */
+/* 🌟 新增的 Tab 导航栏样式 */
+/* ========================================== */
+.tab-header {
+  display: flex;
+  gap: 15px;
+  margin-bottom: 20px;
+  border-bottom: 2px solid #f0f4f8;
+}
+.tab-title {
+  padding: 10px 20px;
+  font-size: 16px;
+  font-weight: bold;
+  color: #64748b;
+  cursor: pointer;
+  border-bottom: 3px solid transparent;
+  transition: all 0.3s ease;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.tab-title:hover {
+  color: var(--primary-color, #3498db);
+}
+.tab-title.active {
+  color: var(--primary-color, #3498db);
+  border-bottom: 3px solid var(--primary-color, #3498db);
+}
+
+/* ========================================== */
+/* 原版基础 CSS 样式 */
 /* ========================================== */
 .panel { background-color: #ffffff; border-radius: 12px; box-shadow: 0 4px 20px rgba(0,0,0,0.04); padding: 24px; min-height: calc(100vh - 112px); box-sizing: border-box; }
 .header-actions { display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #f0f4f8; padding-bottom: 12px; margin-bottom: 20px;}
@@ -513,13 +593,9 @@ onMounted(() => {
 .modal-actions { margin-top: 25px; display: flex; justify-content: flex-end; gap: 15px; }
 
 /* ========================================== */
-/* 🌟 下半部分：井组专属样式 */
+/* 🌟 井组专属样式 (修复了错位问题) */
 /* ========================================== */
-.divider { display: flex; align-items: center; margin: 40px 0 20px 0; }
-.divider-line { flex: 1; height: 1px; background: linear-gradient(to right, transparent, #cbd5e1, transparent); }
-.divider-text { margin: 0 20px; color: #64748b; font-weight: bold; font-size: 14px; display: flex; align-items: center; gap: 8px; }
-
-.group-section { display: flex; gap: 24px; height: 450px; }
+.group-section { display: flex; gap: 24px; height: 500px; margin-top: 10px;}
 
 .group-sidebar { flex: 0 0 300px; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px; display: flex; flex-direction: column; overflow: hidden; }
 .sidebar-header { background: #edf2f7; padding: 15px; border-bottom: 1px solid #e2e8f0; }
@@ -541,26 +617,33 @@ onMounted(() => {
 .group-item.active .arrow-icon { color: #3498db; }
 .empty-group { padding: 30px; text-align: center; color: #94a3b8; font-size: 13px; }
 
-.group-display { flex: 1; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px; display: flex; flex-direction: column; position: relative; overflow: hidden; }
+.group-display { flex: 1; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px; display: flex; flex-direction: column; overflow: hidden; }
 
 .empty-display { display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; color: #94a3b8; }
 .empty-icon { font-size: 60px; color: #cbd5e1; margin-bottom: 15px; opacity: 0.5; }
 .empty-display h4 { margin: 0 0 10px 0; font-size: 18px; color: #64748b;}
 .empty-display p { margin: 0; font-size: 14px;}
 
-.display-header { position: absolute; top: 20px; left: 20px; right: 20px; z-index: 10; display: flex; justify-content: space-between; align-items: flex-start; background: rgba(255,255,255,0.85); backdrop-filter: blur(5px); padding: 15px 20px; border-radius: 8px; box-shadow: 0 4px 15px rgba(0,0,0,0.05); border: 1px solid rgba(226, 232, 240, 0.8); }
+/* 🌟 核心修复：取消绝对定位，改用标准 Flex 排版，完美还原图 2 🌟 */
+.display-header-static {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background: #ffffff;
+  padding: 15px 25px;
+  border-bottom: 1px solid #e2e8f0;
+}
 .header-title h3 { margin: 0 0 5px 0; font-size: 18px; color: #2c3e50; display: flex; align-items: center; gap: 10px; }
 .badge { background: #e74c3c; color: white; font-size: 11px; padding: 2px 6px; border-radius: 4px; font-weight: normal; animation: pulse-red-badge 2s infinite; }
 @keyframes pulse-red-badge { 0% { box-shadow: 0 0 0 0 rgba(231, 76, 60, 0.4); } 70% { box-shadow: 0 0 0 6px rgba(231, 76, 60, 0); } 100% { box-shadow: 0 0 0 0 rgba(231, 76, 60, 0); } }
-.sub-desc { margin: 0; font-size: 12px; color: #7f8c8d; }
 
-.header-stats { display: flex; gap: 20px; }
+.header-stats { display: flex; gap: 30px; }
 .stat-box { display: flex; flex-direction: column; align-items: flex-end; }
-.stat-box label { font-size: 11px; color: #7f8c8d; text-transform: uppercase; margin-bottom: 2px; }
-.stat-box span { font-size: 16px; font-weight: bold; color: #2c3e50; }
-.highlight-box { background: #fdf2e9; padding: 5px 15px; border-radius: 6px; border: 1px solid #fae5d3; }
+.stat-box label { font-size: 12px; color: #7f8c8d; font-weight: bold; margin-bottom: 4px; }
+.stat-box span { font-size: 18px; font-weight: bold; color: #2c3e50; }
+.stat-box small { font-size: 12px; color: #94a3b8; font-weight: normal; }
 .highlight-box label { color: #e67e22; }
-.highlight-box strong { font-size: 20px; color: #d35400; }
+.highlight-box strong { font-size: 24px; color: #d35400; font-weight: 900; }
 
-.topology-chart { flex: 1; width: 100%; min-height: 400px; background: radial-gradient(circle at center, #ffffff 0%, #f1f5f9 100%); }
+.topology-chart { flex: 1; width: 100%; min-height: 380px; background: radial-gradient(circle at center, #ffffff 0%, #f1f5f9 100%); }
 </style>
